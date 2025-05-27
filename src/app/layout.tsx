@@ -109,7 +109,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </button>
               <a href="/" className="logo"><i className="ri-funds-line"></i> Crypto</a>
               <div className="nav-links">
-                <a href="/exchange?coin=bitcoin">거래소</a>
+                <a href="/coin?coin=bitcoin">거래소</a>
                 <a href="/market">시장동향</a>
                 <a href="/history">거래내역</a>
                 <a href="/asset">입출금</a>
@@ -148,7 +148,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="#"><i className="ri-discord-line"></i></a>
         </div>
       </footer>
-      
       <button onClick={scrollToTop} id="scrollTop">
         <i className="ri-arrow-up-s-line"></i>
       </button>

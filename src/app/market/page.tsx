@@ -84,7 +84,7 @@ const DashboardPage = () => {
             }
         }
     };
-
+    
     const renderSparkline = (data: number[], color: string) => {
         const chartData = {
             labels: data.map((_, i) => i),
@@ -112,7 +112,7 @@ const DashboardPage = () => {
             />
         );
     };
-
+    
     return (
         <div>
             {/* Trending Section */}
@@ -135,6 +135,27 @@ const DashboardPage = () => {
                                     <tr key={c.item.id} onClick={() => window.location.href = `/coin/${c.item.id}`}>
                                         <td><img src={c.item.thumb} alt={c.item.name} /> {c.item.name} ({c.item.symbol.toUpperCase()})</td>
                                         <td>{parseFloat(c.item.price_btc).toFixed(6)} BTC</td>
+                                        <td>
+                                        {typeof c.item.data?.market_cap === 'number'
+                                            ? `$${c.item.data.market_cap.toLocaleString()}`
+                                            : 'N/A'}
+                                        </td>
+                                        <td>
+                                        {typeof c.item.data?.total_volume === 'number'
+                                            ? `$${c.item.data.total_volume.toLocaleString()}`
+                                            : 'N/A'}
+                                        </td>
+                                        <td className={
+                                            c.item.data?.price_change_percentage_24h?.usd !== undefined
+                                                ? c.item.data.price_change_percentage_24h.usd >= 0
+                                                    ? 'green'
+                                                    : 'red'
+                                                : ''
+                                        }>
+                                            {c.item.data?.price_change_percentage_24h?.usd !== undefined
+                                                ? `${c.item.data.price_change_percentage_24h.usd.toFixed(2)}%`
+                                                : 'N/A'}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
