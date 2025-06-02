@@ -14,10 +14,11 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
   password  String
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
+  balance   Float     @default(0.0) // 사용자의 KRW 잔고
   holdings  Holding[]
 }
 
@@ -39,4 +40,3 @@ model Price {
 
   @@index([fetchedAt])
 }
-

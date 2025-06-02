@@ -33,8 +33,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         return res.status(200).json({ user })
-    } catch (error: any) {
-        console.error('토큰 검증 실패:', error.message)
-        return res.status(401).json({ message: '유효하지 않은 토큰입니다.' })
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            console.error('토큰 검증 실패:', error.message)
+            return res.status(401).json({ message: '유효하지 않은 토큰입니다.' })
+        } else {
+            console.error('알 수 없는 오류 발생')
+            return res.status(500).json({ message: '서버 오류가 발생했습니다.' })
+        }
     }
 }

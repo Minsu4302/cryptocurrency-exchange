@@ -11,33 +11,35 @@ import {
     Tooltip,
     Legend,
 } from 'chart.js';
+import Image from 'next/image';
+import {
+    CoinTrending,
+    NFTTrending,
+    Asset,
+    Exchange,
+    Category,
+    Company,
+} from '../../types/types'; // ← types.ts 경로 맞게 수정하세요
 
-ChartJS.register(
-    LineElement,
-    LinearScale,
-    CategoryScale,
-    PointElement,
-    Tooltip,
-    Legend
-);
+ChartJS.register(LineElement, LinearScale, CategoryScale, PointElement, Tooltip, Legend);
 
 type TabType = 'tab1' | 'tab2' | 'tab3' | 'tab4';
 
 const DashboardPage = () => {
     const [activeTab, setActiveTab] = useState<TabType>('tab1');
-    const [tabDataLoaded, setTabDataLoaded] = useState<{ [key in TabType]: boolean }>({
+    const [tabDataLoaded, setTabDataLoaded] = useState<Record<TabType, boolean>>({
         tab1: false,
         tab2: false,
         tab3: false,
         tab4: false,
     });
 
-    const [coins, setCoins] = useState<any[]>([]);
-    const [nfts, setNfts] = useState<any[]>([]);
-    const [assets, setAssets] = useState<any[]>([]);
-    const [exchanges, setExchanges] = useState<any[]>([]);
-    const [categories, setCategories] = useState<any[]>([]);
-    const [companies, setCompanies] = useState<any[]>([]);
+    const [coins, setCoins] = useState<{ item: CoinTrending }[]>([]);
+    const [nfts, setNfts] = useState<NFTTrending[]>([]);
+    const [assets, setAssets] = useState<Asset[]>([]);
+    const [exchanges, setExchanges] = useState<Exchange[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
+    const [companies, setCompanies] = useState<Company[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -48,147 +50,158 @@ const DashboardPage = () => {
 
     const fetchTrending = async () => {
         try {
-            const res = await fetch('https://api.coingecko.com/api/v3/search/trending');
-            const data = await res.json();
-            setCoins(data.coins.slice(0, 5));
-            setNfts(data.nfts.slice(0, 5));
+        const res = await fetch('https://api.coingecko.com/api/v3/search/trending');
+        const data = await res.json();
+        setCoins(data.coins.slice(0, 5));
+        setNfts(data.nfts.slice(0, 5));
         } catch {
-            console.error('트렌딩 로드 실패');
+        console.error('트렌딩 로드 실패');
         }
     };
 
     const handleTabChange = async (tab: TabType) => {
         setActiveTab(tab);
         if (!tabDataLoaded[tab]) {
-            setLoading(true);
-            try {
-                if (tab === 'tab1') {
-                    const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=true');
-                    setAssets(await res.json());
-                } else if (tab === 'tab2') {
-                    const res = await fetch('https://api.coingecko.com/api/v3/exchanges');
-                    setExchanges(await res.json());
-                } else if (tab === 'tab3') {
-                    const res = await fetch('https://api.coingecko.com/api/v3/coins/categories');
-                    setCategories(await res.json());
-                } else if (tab === 'tab4') {
-                    const res = await fetch('https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin');
-                    const data = await res.json();
-                    setCompanies(data.companies);
-                }
-                setTabDataLoaded(prev => ({ ...prev, [tab]: true }));
-            } catch {
-                setError('API 호출 실패');
-            } finally {
-                setLoading(false);
+        setLoading(true);
+        try {
+            if (tab === 'tab1') {
+            const res = await fetch(
+                'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=true'
+            );
+            setAssets(await res.json());
+            } else if (tab === 'tab2') {
+            const res = await fetch('https://api.coingecko.com/api/v3/exchanges');
+            setExchanges(await res.json());
+            } else if (tab === 'tab3') {
+            const res = await fetch('https://api.coingecko.com/api/v3/coins/categories');
+            setCategories(await res.json());
+            } else if (tab === 'tab4') {
+            const res = await fetch(
+                'https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin'
+            );
+            const data = await res.json();
+            setCompanies(data.companies);
             }
+            setTabDataLoaded((prev) => ({ ...prev, [tab]: true }));
+        } catch {
+            setError('API 호출 실패');
+        } finally {
+            setLoading(false);
+        }
         }
     };
-    
+
     const renderSparkline = (data: number[], color: string) => {
         const chartData = {
-            labels: data.map((_, i) => i),
-            datasets: [
-                {
-                    data,
-                    borderColor: color,
-                    fill: false,
-                    pointRadius: 0,
-                    borderWidth: 1,
-                },
-            ],
+        labels: data.map((_, i) => i),
+        datasets: [
+            {
+            data,
+            borderColor: color,
+            fill: false,
+            pointRadius: 0,
+            borderWidth: 1,
+            },
+        ],
         };
 
         return (
-            <Line
-                data={chartData}
-                options={{
-                    responsive: false,
-                    scales: { x: { display: false }, y: { display: false } },
-                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
-                }}
-                width={100}
-                height={50}
-            />
+        <Line
+            data={chartData}
+            options={{
+            responsive: false,
+            scales: { x: { display: false }, y: { display: false } },
+            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+            }}
+            width={100}
+            height={50}
+        />
         );
     };
-    
+
     return (
         <div>
-            {/* Trending Section */}
-            <div className="trending">
-                <div className="coins-wrapper">
-                    <div className="header"><h3>Trending Coins</h3></div>
-                    <div className="container">
-                        <table>
-                            <thead>
-                            <tr>
-                            <th>Coin</th>
-                            <th>Price</th>
-                            <th>Market Cap</th>
-                            <th>Volume</th>
-                            <th>24h%</th>
-                            </tr>
-                            </thead>
-                            <tbody>
-                                {coins.map(c => (
-                                    <tr key={c.item.id} onClick={() => window.location.href = `/coin/${c.item.id}`}>
-                                        <td><img src={c.item.thumb} alt={c.item.name} /> {c.item.name} ({c.item.symbol.toUpperCase()})</td>
-                                        <td>{parseFloat(c.item.price_btc).toFixed(6)} BTC</td>
-                                        <td>
-                                        {typeof c.item.data?.market_cap === 'number'
-                                            ? `$${c.item.data.market_cap.toLocaleString()}`
-                                            : 'N/A'}
-                                        </td>
-                                        <td>
-                                        {typeof c.item.data?.total_volume === 'number'
-                                            ? `$${c.item.data.total_volume.toLocaleString()}`
-                                            : 'N/A'}
-                                        </td>
-                                        <td className={
-                                            c.item.data?.price_change_percentage_24h?.usd !== undefined
-                                                ? c.item.data.price_change_percentage_24h.usd >= 0
-                                                    ? 'green'
-                                                    : 'red'
-                                                : ''
-                                        }>
-                                            {c.item.data?.price_change_percentage_24h?.usd !== undefined
-                                                ? `${c.item.data.price_change_percentage_24h.usd.toFixed(2)}%`
-                                                : 'N/A'}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div className="nfts-wrapper">
-                    <div className="header"><h3>Trending NFTs</h3></div>
-                    <div className="container">
-                        <table>
-                            <thead>
-                            <tr>
-                            <th>NFT</th>
-                            <th>Market</th>
-                            <th>Price</th>
-                            <th>24h Vol</th>
-                            <th>24h%</th>
-                            </tr>
-                            </thead>
-                            <tbody>
-                                {nfts.map(n => (
-                                    <tr key={n.id}>
-                                        <td><img src={n.thumb} alt={n.name} /> {n.name}</td>
-                                        <td>{n.data.floor_price}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+        <div className="trending">
+            <div className="coins-wrapper">
+            <div className="header">
+                <h3>Trending Coins</h3>
+            </div>
+            <div className="container">
+                <table>
+                <thead>
+                    <tr>
+                    <th>Coin</th>
+                    <th>Price</th>
+                    <th>Market Cap</th>
+                    <th>Volume</th>
+                    <th>24h%</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {coins.map((c) => (
+                    <tr key={c.item.id} onClick={() => (window.location.href = `/coin/${c.item.id}`)}>
+                        <td>
+                        <Image src={c.item.thumb} alt={c.item.name} width={20} height={20} />{' '}
+                        {c.item.name} ({c.item.symbol.toUpperCase()})
+                        </td>
+                        <td>{parseFloat(c.item.price_btc).toFixed(6)} BTC</td>
+                        <td>
+                        {typeof c.item.data?.market_cap === 'number'
+                            ? `$${c.item.data.market_cap.toLocaleString()}`
+                            : 'N/A'}
+                        </td>
+                        <td>
+                        {typeof c.item.data?.total_volume === 'number'
+                            ? `$${c.item.data.total_volume.toLocaleString()}`
+                            : 'N/A'}
+                        </td>
+                        <td
+                        className={
+                            c.item.data?.price_change_percentage_24h?.usd !== undefined
+                            ? c.item.data.price_change_percentage_24h.usd >= 0
+                                ? 'green'
+                                : 'red'
+                            : ''
+                        }
+                        >
+                        {c.item.data?.price_change_percentage_24h?.usd !== undefined
+                            ? `${c.item.data.price_change_percentage_24h.usd.toFixed(2)}%`
+                            : 'N/A'}
+                        </td>
+                    </tr>
+                    ))}
+                </tbody>
+                </table>
+            </div>
             </div>
 
-            {/* Tabs Section */}
+            <div className="nfts-wrapper">
+            <div className="header">
+                <h3>Trending NFTs</h3>
+            </div>
+            <div className="container">
+                <table>
+                <thead>
+                    <tr>
+                    <th>NFT</th>
+                    <th>Floor Price</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {nfts.map((n) => (
+                    <tr key={n.id}>
+                        <td>
+                        <Image src={n.thumb} alt={n.name} width={20} height={20} /> {n.name}
+                        </td>
+                        <td>{n.data?.floor_price ?? 'N/A'}</td>
+                    </tr>
+                    ))}
+                </tbody>
+                </table>
+            </div>
+            </div>
+        </div>
+
             <div className="tab-container">
                 <div className="tabs">
                     <button className={`tab-button ${activeTab === 'tab1' ? 'active' : ''}`} onClick={() => handleTabChange('tab1')}>Assets</button>
@@ -203,15 +216,15 @@ const DashboardPage = () => {
                 {!loading && activeTab === 'tab1' && (
                     <div className="tab-content">
                         <table>
-                        <thead>
-                            <tr>
-                            <th>Rank</th>
-                            <th>Coin</th>
-                            <th>Price (KRW)</th>
-                            <th>24h %</th>
-                            <th>7D Chart</th>
-                            </tr>
-                        </thead>
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Coin</th>
+                                    <th>Price (KRW)</th>
+                                    <th>24h %</th>
+                                    <th>7D Chart</th>
+                                </tr>
+                            </thead>
                             <tbody>
                                 {assets.map(asset => (
                                     <tr key={asset.id}>
@@ -232,18 +245,18 @@ const DashboardPage = () => {
                 {!loading && activeTab === 'tab2' && (
                     <div className="tab-content">
                         <table>
-                        <thead>
-                            <tr>
-                            <th>Rank</th>
-                            <th>Exchange</th>
-                            <th>TRUST Score(USD)</th>
-                            <th>24h Trade</th>
-                            <th>24h Trade (Normal)</th>
-                            <th>Country</th>
-                            <th>Website</th>
-                            <th>Year</th>
-                            </tr>
-                        </thead>
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Exchange</th>
+                                    <th>TRUST Score(USD)</th>
+                                    <th>24h Trade</th>
+                                    <th>24h Trade (Normal)</th>
+                                    <th>Country</th>
+                                    <th>Website</th>
+                                    <th>Year</th>
+                                </tr>
+                            </thead>
                             <tbody>
                                 {exchanges.slice(0, 20).map(ex => (
                                     <tr key={ex.id}>
@@ -266,13 +279,13 @@ const DashboardPage = () => {
                     <div className="tab-content">
                         <table>
                             <thead>
-                            <tr>
-                            <th>Top Coins</th>
-                            <th>Category</th>
-                            <th>Market Cap (원)</th>
-                            <th>24h Market Cap (원)</th>
-                            <th>24h volume (원)</th>
-                            </tr>
+                                <tr>
+                                    <th>Top Coins</th>
+                                    <th>Category</th>
+                                    <th>Market Cap (원)</th>
+                                    <th>24h Market Cap (원)</th>
+                                    <th>24h volume (원)</th>
+                                </tr>
                             </thead>
                             <tbody>
                                 {categories.slice(0, 20).map(cat => (
@@ -293,14 +306,14 @@ const DashboardPage = () => {
                     <div className="tab-content">
                         <table>
                             <thead>
-                            <tr>
-                            <th>Company</th>
-                            <th>Total BTC</th>
-                            <th>Entry Value (KRW)</th>
-                            <th>Total Current Value (KRW)</th>
-                            <th>Total %</th>
-                            </tr>
-                        </thead>
+                                <tr>
+                                    <th>Company</th>
+                                    <th>Total BTC</th>
+                                    <th>Entry Value (KRW)</th>
+                                    <th>Total Current Value (KRW)</th>
+                                    <th>Total %</th>
+                                </tr>
+                            </thead>
                             <tbody>
                                 {companies.map(comp => (
                                     <tr key={comp.name}>

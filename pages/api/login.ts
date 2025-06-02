@@ -35,8 +35,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         )
 
         return res.status(200).json({ message: '로그인 성공', token })
-    } catch (error: any) {
-        console.error('로그인 오류:', error.message)
-        return res.status(500).json({ message: '서버 오류', error: error.message })
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+        console.error('로그인 오류:', error.message);
+        return res.status(500).json({ message: '서버 오류', error: error.message });
+        } else {
+            console.error('알 수 없는 오류:', error);
+            return res.status(500).json({ message: '서버 오류', error: '알 수 없는 오류' });
+        }
     }
 }
