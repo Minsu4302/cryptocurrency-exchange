@@ -35,8 +35,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         message: '가격 저장 완료',
         count: saved.count,
         })
-    } catch (error: any) {
-        console.error('가격 저장 실패:', error.message)
-        return res.status(500).json({ message: '서버 오류', error: error.message })
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error('가격 저장 실패:', err.message);
+        return res.status(500).json({ message: '서버 오류', error: err.message });
     }
 }
