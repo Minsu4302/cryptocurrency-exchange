@@ -20,19 +20,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const decoded = verifyToken(token)
 
         const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: {
-            id: true,
-            email: true,
-            createdAt: true,
-        },
+            where: { id: decoded.userId },
+            select: {
+                id: true,
+                email: true,
+                createdAt: true,
+                balance: true,
+            },
         })
 
         if (!user) {
-        return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' })
+            return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' })
         }
 
-        return res.status(200).json({ user })
+        return res.status(200).json({
+            user: {
+                id: user.id,
+                email: user.email,
+                createdAt: user.createdAt,
+                balance: Number(user.balance ?? 0),
+            },
+        })
     } catch (error: unknown) {
         if (error instanceof Error) {
             console.error('토큰 검증 실패:', error.message)

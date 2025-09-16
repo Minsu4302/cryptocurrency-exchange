@@ -204,6 +204,7 @@ nav .left-section .nav-links a:hover{
 nav .right-section{
     width: 40%;
     gap: 20px;
+    font-size: 14px;
 }
 
 nav .right-section .search{
@@ -243,6 +244,12 @@ nav .right-section > i.ri-sun-line{
 
 nav .right-section > i.ri-moon-line{
     transform: rotate(360deg);
+}
+
+nav .right-section .account .logout{
+    margin-left: 10px;
+    border-radius: 10px;
+    padding: 2px 7px;
 }
 
 nav .right-section a{
@@ -787,6 +794,39 @@ footer .social-icons a i,
     font-weight: 600;
 }
 
+.coin-container .right-section .status .container .item .buy,
+.coin-container .right-section .status .container .item .sell {
+    font-size: 16px;
+    padding: 5px 30px;
+    border-radius: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin: 1px 30px;
+}
+
+.coin-container .right-section .status .container .item .orderType {
+    padding: 1px 7px;
+    border-radius: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.coin-container .right-section .status .container .item .sell:hover,
+.coin-container .right-section .status .container .item .sell:active,
+.coin-container .right-section .status .container .item .buy:hover,
+.coin-container .right-section .status .container .item .buy:active,
+.coin-container .right-section .status .container .item .orderType:hover,
+.coin-container .right-section .status .container .item .orderType:active {
+    background: var(--background-color-secondary);
+    color: var(--color-white);
+}
+
 .coin-container .main-section{
     width: 48%;
 }
@@ -804,6 +844,13 @@ footer .social-icons a i,
     width: 22%;
     display: flex;
     flex-direction: column;
+}
+
+.coin-container .right-section .order_btn{
+    background-color: var(--chart-dark-border);
+    height: 35px;
+    color: #fff;
+    border-radius: 20px;
 }
 
 .coin-container .right-section .status:first-child > h3{

@@ -38,6 +38,9 @@ export default function CoinPage() {
     const [error, setError] = useState<string | null>(null);
     const { theme } = useTheme();
 
+    // 주문 유형 상태(초기값: 매수)
+    const [orderType, setOrderType] = useState<'buy' | 'sell'>('buy');
+
     useEffect(() => {
         fetch(`https://api.coingecko.com/api/v3/coins/${id}`)
             .then(res => res.json())
@@ -99,6 +102,12 @@ export default function CoinPage() {
     if (error) return <div className="error-message">{error}</div>;
     if (!coin) return <div>Loading...</div>;
 
+    // 선택된 버튼에만 nav 스타일과 동일한 색상(배경/글자색) 유지
+    const selectedBtnStyle = {
+        background: 'var(--background-color-secondary)',
+        color: 'var(--color-white)'
+    } as const;
+
     return (
         <main className="main">
             <div className="coin-container">
@@ -141,13 +150,66 @@ export default function CoinPage() {
                             <div className="item"><p className="str">24h High</p><p className="num">{coin.market_data.high_24h.krw.toLocaleString()} 원</p></div>
                             <div className="item"><p className="str">24h Low</p><p className="num">{coin.market_data.low_24h.krw.toLocaleString()} 원</p></div>
                         </div>
+
+                        <h3>Trading</h3>
+                        <div className="container">
+                            <div className="item">
+                                <button
+                                    className="buy"
+                                    type="button"
+                                    onClick={() => setOrderType('buy')}
+                                    style={orderType === 'buy' ? selectedBtnStyle : undefined}
+                                >
+                                    매수
+                                </button>
+                                <button
+                                    className="sell"
+                                    type="button"
+                                    onClick={() => setOrderType('sell')}
+                                    style={orderType === 'sell' ? selectedBtnStyle : undefined}
+                                >
+                                    매도
+                                </button>
+                            </div>
+
+                            <div className="item">
+                                <p className="str">주문유형</p>
+                                <button className="orderType">시장가</button>
+                                <button className="orderType">지정가</button>
+                            </div>
+
+                            <div className="item">
+                                <p className="str">주문가능</p>
+                                <p className="num">—</p>
+                            </div>
+
+                            <div className="item">
+                                <p className="str">{orderType === 'buy' ? '매수가격' : '매도가격'}</p>
+                                <p className="num">{coin.market_data.current_price.krw.toLocaleString()} 원</p>
+                            </div>
+
+                            <div className="item">
+                                <p className="str">주문수량</p>
+                                <p className="num">—</p>
+                            </div>
+
+                            <div className="item">
+                                <p className="str">주문총액</p>
+                                <p className="num">—</p>
+                            </div>
+                        </div>
+                        <button className="order_btn">주문하기</button>
                     </div>
                 </div>
             </div>
 
             <div className="coin-desc">
                 <h3>About Asset</h3>
-                <p dangerouslySetInnerHTML={{ __html: coin.description.en || '<p>No description available</p>' }} />
+                <p
+                    dangerouslySetInnerHTML={{
+                        __html: coin.description.en || '<p>No description available</p>'
+                    }}
+                />
             </div>
         </main>
     );

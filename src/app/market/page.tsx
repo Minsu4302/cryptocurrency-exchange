@@ -191,7 +191,7 @@ const DashboardPage = () => {
                     {nfts.map((n) => (
                     <tr key={n.id}>
                         <td>
-                        <Image src={n.thumb} alt={n.name} width={20} height={20} /> {n.name}
+                        <img src={n.thumb} alt={n.name} width={20} height={20} /> {n.name}
                         </td>
                         <td>{n.data?.floor_price ?? 'N/A'}</td>
                     </tr>
