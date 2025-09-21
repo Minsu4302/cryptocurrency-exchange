@@ -10,9 +10,13 @@
   },
   "dependencies": {
     "@prisma/client": "^6.8.2",
+    "@upstash/ratelimit": "^2.0.6",
+    "@upstash/redis": "^1.35.4",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",
     "chart.js": "^4.4.9",
+    "dompurify": "^3.2.7",
+    "ioredis": "^5.7.0",
     "jsonwebtoken": "^9.0.2",
     "next": "15.3.1",
     "react": "^19.0.0",
@@ -26,13 +30,16 @@
     "@tailwindcss/postcss": "^4",
     "@types/bcrypt": "^5.0.2",
     "@types/jsonwebtoken": "^9.0.9",
-    "@types/node": "^20",
+    "@types/node": "20",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19",
+    "dotenv": "^17.2.2",
     "eslint": "^9",
     "eslint-config-next": "15.3.1",
     "prisma": "^6.8.2",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.5",
     "typescript": "^5"
   }
 }

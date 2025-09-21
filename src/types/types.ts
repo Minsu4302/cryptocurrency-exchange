@@ -1,4 +1,11 @@
 // types.ts
+export interface CoinData {
+    market_cap?: number;
+    total_volume?: number;
+    price_change_percentage_24h?: {
+        usd?: number;
+    };
+}
 
 export interface CoinTrending {
     id: string;
@@ -13,6 +20,10 @@ export interface CoinTrending {
         usd: number;
         };
     };
+}
+
+export interface NFTData {
+    floor_price?: string;
 }
 
 export interface NFTTrending {
@@ -66,3 +77,4 @@ export interface Company {
     total_current_value_usd: number;
     percentage_of_total_supply: number;
 }
+

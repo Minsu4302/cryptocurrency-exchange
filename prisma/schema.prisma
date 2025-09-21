@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,13 +7,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/* ===== 기존 테이블 그대로 ===== */
 model User {
   id        Int       @id @default(autoincrement())
   email     String    @unique
   password  String
   createdAt DateTime  @default(now())
-  balance   Float     @default(0.0) // 사용자의 KRW 잔고
-  holdings  Holding[]
+  balance   Float     @default(0.0)
+
+  holdings          Holding[]
+  trades            Trade[]
+  transfers         Transfer[]
+  tickets           SupportTicket[]
+  balanceSnapshots  BalanceSnapshot[]
 }
 
 model Holding {
@@ -28,15 +28,165 @@ model Holding {
   amount   Float
   userId   Int
   user     User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, symbol])
 }
 
-model Price {
-  id        Int      @id @default(autoincrement())
-  symbol    String
-  price     Float
-  currency  String   @default("krw")
-  source    String   @default("coingecko")
-  fetchedAt DateTime @default(now())
+/* ===== 신규 테이블 추가 (가격/차트 없음) ===== */
+model Asset {
+  id           Int       @id @default(autoincrement())
+  coingeckoId  String    @unique // 이제 필수
+  symbol       String
+  name         String
+  status       AssetStatus @default(ACTIVE)
+  precision    Int         @default(18)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
-  @@index([fetchedAt])
+  trades       Trade[]
+  transfers    Transfer[]
+  balanceSnapshots BalanceSnapshot[]
+
+  @@index([symbol])
+}
+
+enum AssetStatus {
+  ACTIVE
+  INACTIVE
+  DELISTED
+}
+
+model Trade {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  assetId     Int
+  side        TradeSide
+  orderType   OrderType            // ✅ 신규 추가
+  quantity    Decimal              @db.Decimal(38, 18)
+  price       Decimal              @db.Decimal(38, 18)   // 체결가 (MARKET도 체결가 기록 필요)
+  fee         Decimal              @db.Decimal(38, 18)
+  feeCurrency String               @default("KRW")
+  executedAt  DateTime
+  priceSource String               @default("coingecko")
+  priceAsOf   DateTime
+  orderId     String?
+  externalRef String?
+
+  user   User   @relation(fields: [userId], references: [id])
+  asset  Asset  @relation(fields: [assetId], references: [id])
+
+  @@index([userId, executedAt])
+  @@index([assetId, executedAt])
+  @@index([orderId])
+}
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+}
+
+model Transfer {
+  id           Int             @id @default(autoincrement())
+  userId       Int
+  user         User            @relation(fields: [userId], references: [id])
+
+  type         TransferType
+  status       TransferStatus
+
+  assetId      Int
+  asset        Asset           @relation(fields: [assetId], references: [id])
+
+  amount       Decimal         @db.Decimal(38, 18)
+  fee          Decimal?        @db.Decimal(38, 18)
+  network      String?
+  address      String?
+  txId         String?
+  requestedAt  DateTime        @default(now())
+  processedAt  DateTime?
+
+  @@index([userId, requestedAt])
+  @@index([assetId, requestedAt])
+  @@index([type, status])
+  @@index([txId])
+}
+
+enum TransferType {
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum TransferStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELED
+}
+
+model BalanceSnapshot {
+  id       Int       @id @default(autoincrement())
+  userId   Int
+  user     User      @relation(fields: [userId], references: [id])
+
+  assetId  Int
+  asset    Asset     @relation(fields: [assetId], references: [id])
+
+  amount   Decimal   @db.Decimal(38, 18)
+  takenAt  DateTime  @default(now())
+
+  @@unique([userId, assetId, takenAt])
+  @@index([userId, takenAt])
+}
+
+model SupportTicket {
+  id          Int              @id @default(autoincrement())
+  userId      Int
+  user        User             @relation(fields: [userId], references: [id])
+
+  title       String
+  status      TicketStatus     @default(OPEN)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  messages    TicketMessage[]
+
+  @@index([userId, updatedAt])
+  @@index([status, updatedAt])
+}
+
+model TicketMessage {
+  id         Int           @id @default(autoincrement())
+  ticketId   Int
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id])
+
+  authorType MessageAuthor @default(USER)
+  body       String
+  createdAt  DateTime      @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum MessageAuthor {
+  USER
+  ADMIN
+}
+
+model IdempotencyKey {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  purpose   String   // 'trade:create' | 'transfer:create' | 'ticket:create' 등
+  userId    Int
+  createdAt DateTime @default(now())
+
+  @@index([userId, purpose])
 }

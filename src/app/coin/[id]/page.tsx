@@ -1,11 +1,13 @@
+// coin/[id]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import 'remixicon/fonts/remixicon.css';
-import '../../globals.css'
+import '../../globals.css';
 import { useTheme } from '../../../context/ThemeContext';
+import { sanitize } from '../../../../lib/sanitize';
 
 interface CoinData {
     id: string;
@@ -38,15 +40,49 @@ export default function CoinPage() {
     const [error, setError] = useState<string | null>(null);
     const { theme } = useTheme();
 
-    // 주문 유형 상태(초기값: 매수)
+    // 매수/매도
     const [orderType, setOrderType] = useState<'buy' | 'sell'>('buy');
 
+    // 주문유형: 시장가 / 지정가
+    const [priceType, setPriceType] = useState<'market' | 'limit'>('limit');
+
+    // 사용자 잔액 (KRW)
+    const [userBalance, setUserBalance] = useState<number>(0);
+
+    // 주문 수량
+    const [qty, setQty] = useState<string>("");
+
+    // 가격 입력 상태
+    const [priceInput, setPriceInput] = useState<number>(0);
+
     useEffect(() => {
-        fetch(`https://api.coingecko.com/api/v3/coins/${id}`)
-            .then(res => res.json())
+        fetch(`/api/coins/${id}`)
+            .then((res) => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
             .then((data) => setCoin(data as CoinData))
-            .catch(() => setError('API limit reached. Please try again later.'));
+            .catch(() => setError('네트워크가 불안정합니다. 잠시 후 다시 시도해 주세요.'));
     }, [id]);
+
+    // 로컬스토리지에서 사용자 잔액 로드
+    useEffect(() => {
+        try {
+            const raw = localStorage.getItem("AUTH");
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            const b = Number(parsed?.balance ?? 0);
+            if (!Number.isNaN(b)) {
+                setUserBalance(b);
+            }
+        } catch {}
+    }, []);
+
+    const priceKRW = useMemo(() => coin?.market_data.current_price.krw ?? 0, [coin]);
+
+    useEffect(() => {
+        if (priceKRW > 0) setPriceInput(priceKRW);
+    }, [priceKRW]);
 
     useEffect(() => {
         if (!coin) return;
@@ -102,11 +138,35 @@ export default function CoinPage() {
     if (error) return <div className="error-message">{error}</div>;
     if (!coin) return <div>Loading...</div>;
 
-    // 선택된 버튼에만 nav 스타일과 동일한 색상(배경/글자색) 유지
     const selectedBtnStyle = {
         background: 'var(--background-color-secondary)',
         color: 'var(--color-white)'
     } as const;
+
+    const formatPrice = (value: number) =>
+        Number.isFinite(value) ? `${value.toLocaleString()} 원` : '';
+
+    const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const raw = e.target.value.replace(/[^0-9]/g, '');
+        let num = Number(raw);
+        if (Number.isNaN(num)) num = 0;
+        setPriceInput(num);
+    };
+
+    const stepPriceUp = () => setPriceInput(prev => prev + 1000);
+    const stepPriceDown = () => setPriceInput(prev => prev - 1000);
+
+    const qtyNum = (() => {
+        const n = Number(qty);
+        return Number.isFinite(n) ? n : 0;
+    })();
+
+    const totalKRW = priceInput * qtyNum;
+
+    const handleSelectPriceType = (type: 'market' | 'limit') => {
+        setPriceType(type);
+        if (type === 'market') setQty("");
+    };
 
     return (
         <main className="main">
@@ -124,7 +184,7 @@ export default function CoinPage() {
                         </div>
                         <div className="status">
                             <div className="item"><p className="str">Market Cap</p><p className="num">{coin.market_data.market_cap.krw.toLocaleString()} 원</p></div>
-                            <div className="item"><p className="str">Current Price</p><p className="num">{coin.market_data.current_price.krw.toLocaleString()} 원</p></div>
+                            <div className="item"><p className="str">Current Price</p><p className="num">{priceKRW.toLocaleString()} 원</p></div>
                             <div className="item"><p className="str">All Time High</p><p className="num">{coin.market_data.ath.krw.toLocaleString()} 원</p></div>
                             <div className="item"><p className="str">All Time Low</p><p className="num">{coin.market_data.atl.krw.toLocaleString()} 원</p></div>
                             <div className="item"><p className="str">Total Volume</p><p className="num">{coin.market_data.total_volume.krw.toLocaleString()} 원</p></div>
@@ -174,30 +234,97 @@ export default function CoinPage() {
 
                             <div className="item">
                                 <p className="str">주문유형</p>
-                                <button className="orderType">시장가</button>
-                                <button className="orderType">지정가</button>
+                                <button
+                                    className="orderType"
+                                    type="button"
+                                    onClick={() => handleSelectPriceType('limit')}
+                                    style={priceType === 'limit' ? selectedBtnStyle : undefined}
+                                >
+                                    지정가
+                                </button>
+                                <button
+                                    className="orderType"
+                                    type="button"
+                                    onClick={() => handleSelectPriceType('market')}
+                                    style={priceType === 'market' ? selectedBtnStyle : undefined}
+                                >
+                                    시장가
+                                </button>
                             </div>
 
                             <div className="item">
                                 <p className="str">주문가능</p>
-                                <p className="num">—</p>
+                                <p className="num">{userBalance.toLocaleString()} 원</p>
                             </div>
 
                             <div className="item">
                                 <p className="str">{orderType === 'buy' ? '매수가격' : '매도가격'}</p>
-                                <p className="num">{coin.market_data.current_price.krw.toLocaleString()} 원</p>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+                                    <input
+                                        type="text"
+                                        className="orderPrice"
+                                        inputMode="numeric"
+                                        placeholder={`${priceKRW.toLocaleString()} 원`}
+                                        value={formatPrice(priceInput)}
+                                        onChange={handlePriceChange}
+                                        style={{ textAlign: 'right', flex: 1 }}
+                                    />
+                                    <div style={{ display: 'flex', flexDirection: 'row', gap: 6 }}>
+                                        <button
+                                            type="button"
+                                            onClick={stepPriceUp}
+                                            style={{
+                                                padding: '1px 5px',
+                                                borderRadius: 8,
+                                                border: '1px solid var(--background-color-secondary)',
+                                                background: 'transparent',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            ▲
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={stepPriceDown}
+                                            style={{
+                                                padding: '1px 5px',
+                                                borderRadius: 8,
+                                                border: '1px solid var(--background-color-secondary)',
+                                                background: 'transparent',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            ▼
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="item">
-                                <p className="str">주문수량</p>
-                                <p className="num">—</p>
-                            </div>
-
-                            <div className="item">
-                                <p className="str">주문총액</p>
-                                <p className="num">—</p>
-                            </div>
+                            {priceType === 'limit' && (
+                                <>
+                                    <div className="item">
+                                        <p className="str">주문수량</p>
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            min="0"
+                                            className="orderNum"
+                                            placeholder="0"
+                                            value={qty}
+                                            onChange={(e) => setQty(e.target.value)}
+                                            style={{ textAlign: 'right' }}
+                                        />
+                                    </div>
+                                    <div className="item">
+                                        <p className="str">주문총액</p>
+                                        <p className="num">
+                                            {Number.isFinite(totalKRW) ? Math.ceil(totalKRW).toLocaleString() : '—'} 원
+                                        </p>
+                                    </div>
+                                </>
+                            )}
                         </div>
+
                         <button className="order_btn">주문하기</button>
                     </div>
                 </div>
@@ -207,7 +334,7 @@ export default function CoinPage() {
                 <h3>About Asset</h3>
                 <p
                     dangerouslySetInnerHTML={{
-                        __html: coin.description.en || '<p>No description available</p>'
+                        __html: sanitize(coin.description.en) || '<p>No description available</p>'
                     }}
                 />
             </div>
