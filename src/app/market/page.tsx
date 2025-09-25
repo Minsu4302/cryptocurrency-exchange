@@ -26,6 +26,14 @@ ChartJS.register(LineElement, LinearScale, CategoryScale, PointElement, Tooltip,
 
 type TabType = 'tab1' | 'tab2' | 'tab3' | 'tab4';
 
+// ---------- 숫자/서식 유틸 ----------
+const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+const fmtPct = (v: unknown, digits = 2) => (isNumber(v) ? `${v.toFixed(digits)}%` : 'N/A');
+const fmtUSD = (v: unknown) => (isNumber(v) ? `$${v.toLocaleString()}` : 'N/A');
+const fmtBTC = (v: unknown) => (isNumber(v) ? `${v.toLocaleString()} BTC` : 'N/A');
+const fmtInt = (v: unknown) => (isNumber(v) ? v.toLocaleString() : 'N/A');
+
 const MarketPage = () => {
     const [activeTab, setActiveTab] = useState<TabType>('tab1');
     const [tabDataLoaded, setTabDataLoaded] = useState<Record<TabType, boolean>>({
@@ -98,13 +106,17 @@ const MarketPage = () => {
         }
     };
 
-    const renderSparkline = (data: number[], color: string) => {
+    const renderSparkline = (data?: number[], color?: string) => {
+        if (!Array.isArray(data) || data.length < 2) {
+            return <span>-</span>;
+        }
+
         const chartData = {
             labels: data.map((_, i) => i),
             datasets: [
                 {
                     data,
-                    borderColor: color,
+                    borderColor: color || 'rgba(0,0,0,0.5)',
                     fill: false,
                     pointRadius: 0,
                     borderWidth: 1,
@@ -145,47 +157,33 @@ const MarketPage = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {coins.map((c) => (
-                                    <tr
-                                        key={c.item.id}
-                                        onClick={() => (window.location.href = `/coin/${c.item.id}`)}
-                                        style={{ cursor: 'pointer' }}
-                                    >
-                                        <td>
-                                            <Image
-                                                src={c.item.thumb}
-                                                alt={c.item.name}
-                                                width={20}
-                                                height={20}
-                                            />{' '}
-                                            {c.item.name} ({c.item.symbol.toUpperCase()})
-                                        </td>
-                                        <td>{parseFloat(c.item.price_btc).toFixed(6)} BTC</td>
-                                        <td>
-                                            {typeof c.item.data?.market_cap === 'number'
-                                                ? `$${c.item.data.market_cap.toLocaleString()}`
-                                                : 'N/A'}
-                                        </td>
-                                        <td>
-                                            {typeof c.item.data?.total_volume === 'number'
-                                                ? `$${c.item.data.total_volume.toLocaleString()}`
-                                                : 'N/A'}
-                                        </td>
-                                        <td
-                                            className={
-                                                c.item.data?.price_change_percentage_24h?.usd !== undefined
-                                                    ? c.item.data.price_change_percentage_24h.usd >= 0
-                                                        ? 'green'
-                                                        : 'red'
-                                                    : ''
-                                            }
+                                {coins.map((c) => {
+                                    const usdChange = c.item.data?.price_change_percentage_24h?.usd;
+                                    const usdChangeIsNum = isNumber(usdChange);
+                                    return (
+                                        <tr
+                                            key={c.item.id}
+                                            onClick={() => (window.location.href = `/coin/${c.item.id}`)}
+                                            style={{ cursor: 'pointer' }}
                                         >
-                                            {c.item.data?.price_change_percentage_24h?.usd !== undefined
-                                                ? `${c.item.data.price_change_percentage_24h.usd.toFixed(2)}%`
-                                                : 'N/A'}
-                                        </td>
-                                    </tr>
-                                ))}
+                                            <td>
+                                                <Image
+                                                    src={c.item.thumb}
+                                                    alt={c.item.name}
+                                                    width={20}
+                                                    height={20}
+                                                />{' '}
+                                                {c.item.name} ({c.item.symbol.toUpperCase()})
+                                            </td>
+                                            <td>{parseFloat(c.item.price_btc).toFixed(6)} BTC</td>
+                                            <td>{fmtUSD(c.item.data?.market_cap)}</td>
+                                            <td>{fmtUSD(c.item.data?.total_volume)}</td>
+                                            <td className={usdChangeIsNum ? (usdChange! >= 0 ? 'green' : 'red') : ''}>
+                                                {fmtPct(usdChange)}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -262,27 +260,37 @@ const MarketPage = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {assets.map((asset) => (
-                                    <tr key={asset.id}>
-                                        <td>{asset.market_cap_rank}</td>
-                                        <td>
-                                            <img src={asset.image} alt={asset.name} /> {asset.name}
-                                        </td>
-                                        <td>{asset.current_price.toLocaleString()}</td>
-                                        <td className={asset.price_change_percentage_24h >= 0 ? 'green' : 'red'}>
-                                            {asset.price_change_percentage_24h.toFixed(2)}%
-                                        </td>
-                                        <td>
-                                            {renderSparkline(
-                                                asset.sparkline_in_7d.price,
-                                                asset.sparkline_in_7d.price[0] <=
-                                                    asset.sparkline_in_7d.price[asset.sparkline_in_7d.price.length - 1]
-                                                    ? 'green'
-                                                    : 'red'
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
+                                {assets.map((asset) => {
+                                    const pct24h = asset.price_change_percentage_24h as unknown;
+                                    const pctIsNum = isNumber(pct24h);
+                                    const spark = asset.sparkline_in_7d?.price;
+                                    const sparkColor =
+                                        Array.isArray(spark) && spark.length > 1
+                                            ? spark[0] <= spark[spark.length - 1]
+                                                ? 'green'
+                                                : 'red'
+                                            : undefined;
+                                    return (
+                                        <tr key={asset.id}>
+                                            <td>{fmtInt(asset.market_cap_rank)}</td>
+                                            <td>
+                                                <img src={asset.image} alt={asset.name} />{' '}
+                                                <span
+                                                    onClick={() => (window.location.href = `/coin/${asset.id}`)}
+                                                    style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                                                    title="코인 상세(거래소)로 이동"
+                                                >
+                                                    {asset.name}
+                                                </span>
+                                            </td>
+                                            <td>{fmtUSD(asset.current_price)}</td>
+                                            <td className={pctIsNum ? ((pct24h as number) >= 0 ? 'green' : 'red') : ''}>
+                                                {fmtPct(pct24h)}
+                                            </td>
+                                            <td>{renderSparkline(spark, sparkColor)}</td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -306,13 +314,13 @@ const MarketPage = () => {
                             <tbody>
                                 {exchanges.slice(0, 20).map((ex) => (
                                     <tr key={ex.id}>
-                                        <td>{ex.trust_score_rank}</td>
+                                        <td>{fmtInt(ex.trust_score_rank)}</td>
                                         <td>
                                             <img src={ex.image} alt={ex.name} /> {ex.name}
                                         </td>
-                                        <td>{ex.trust_score}</td>
-                                        <td>{ex.trade_volume_24h_btc.toLocaleString()} BTC</td>
-                                        <td>{ex.trade_volume_24h_btc_normalized.toLocaleString()} BTC</td>
+                                        <td>{fmtInt(ex.trust_score)}</td>
+                                        <td>{fmtBTC(ex.trade_volume_24h_btc)}</td>
+                                        <td>{fmtBTC(ex.trade_volume_24h_btc_normalized)}</td>
                                         <td>{ex.country || 'N/A'}</td>
                                         <td>{ex.url}</td>
                                         <td>{ex.year_established || 'N/A'}</td>
@@ -344,11 +352,19 @@ const MarketPage = () => {
                                             ))}
                                         </td>
                                         <td>{cat.name}</td>
-                                        <td>{cat.market_cap?.toLocaleString()} USD</td>
-                                        <td className={cat.market_cap_change_24h >= 0 ? 'green' : 'red'}>
-                                            {cat.market_cap_change_24h?.toFixed(2)}%
+                                        <td>{fmtUSD(cat.market_cap)}</td>
+                                        <td
+                                            className={
+                                                isNumber(cat.market_cap_change_24h)
+                                                    ? cat.market_cap_change_24h! >= 0
+                                                        ? 'green'
+                                                        : 'red'
+                                                    : ''
+                                            }
+                                        >
+                                            {fmtPct(cat.market_cap_change_24h)}
                                         </td>
-                                        <td>{cat.volume_24h?.toLocaleString()} USD</td>
+                                        <td>{fmtUSD(cat.volume_24h)}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -372,10 +388,10 @@ const MarketPage = () => {
                                 {companies.map((comp) => (
                                     <tr key={comp.name}>
                                         <td>{comp.name}</td>
-                                        <td>{comp.total_holdings}</td>
-                                        <td>{comp.total_entry_value_usd.toLocaleString()} USD</td>
-                                        <td>{comp.total_current_value_usd.toLocaleString()} USD</td>
-                                        <td>{comp.percentage_of_total_supply.toFixed(2)}%</td>
+                                        <td>{fmtInt(comp.total_holdings)}</td>
+                                        <td>{fmtUSD(comp.total_entry_value_usd)}</td>
+                                        <td>{fmtUSD(comp.total_current_value_usd)}</td>
+                                        <td>{fmtPct(comp.percentage_of_total_supply)}</td>
                                     </tr>
                                 ))}
                             </tbody>

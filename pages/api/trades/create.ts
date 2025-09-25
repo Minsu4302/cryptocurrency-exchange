@@ -1,100 +1,231 @@
 // pages/api/trades/create.ts
-import type { NextApiRequest, NextApiResponse } from 'next'
-import prisma from '../../../lib/prisma'
-import { getAssetIdOrThrow } from '../../../lib/assets'
-import { incrUserAssetBalance } from '../../../lib/wallet'
-import { ensureIdempotent } from '../../../lib/idempotency'
-import { getLimiter } from '../../../lib/ratelimit'
-import { z } from 'zod'
+import type { NextApiRequest, NextApiResponse } from 'next';
+import prisma from '../../../lib/prisma';
+import { getAssetIdOrThrow } from '../../../lib/assets';
+import { incrUserAssetBalance } from '../../../lib/wallet'; // 기존 사용 중이면 유지
+import { getLimiter } from '../../../lib/ratelimit';
+import { ensureIdempotentBegin, ensureIdempotentEnd } from '../../../lib/idempotency';
+import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 
 const CreateTradeSchema = z.object({
     userId: z.number().int().positive(),
     symbol: z.string().min(1),
     side: z.enum(['BUY', 'SELL']),
     orderType: z.enum(['MARKET', 'LIMIT']),
-    // 체결된 수량/가격(문자열 Decimal)
     quantity: z.string().regex(/^\d+(\.\d+)?$/, 'decimal string required'),
     price: z.string().regex(/^\d+(\.\d+)?$/, 'decimal string required'),
-    // 수수료/통화
     fee: z.string().regex(/^\d+(\.\d+)?$/).optional(),
     feeCurrency: z.string().default('KRW'),
-    // 가격 출처/시각
     priceSource: z.string().default('coingecko'),
-    priceAsOf: z.string().datetime().optional(), // MARKET일 때 되도록 포함하도록 권장
-    // 참조 값
+    priceAsOf: z.string().datetime().optional(),
     orderId: z.string().optional(),
     externalRef: z.string().optional(),
-    // 중복 방지
-    idempotencyKey: z.string().optional(),
-})
+    idempotencyKey: z.string().min(16, 'idempotencyKey required'),
+});
+
+function firstString(v: unknown): string | undefined {
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) return v.find((x) => typeof x === 'string');
+    return undefined;
+}
+
+function coerceFromAny(anyObj: any) {
+    const userIdStr = firstString(anyObj?.userId) ?? (typeof anyObj?.userId === 'number' ? String(anyObj.userId) : undefined);
+    const userIdNum = userIdStr ? Number(userIdStr) : undefined;
+    const obj = {
+        userId: userIdNum,
+        symbol: firstString(anyObj?.symbol),
+        side: firstString(anyObj?.side),
+        orderType: firstString(anyObj?.orderType),
+        quantity: firstString(anyObj?.quantity),
+        price: firstString(anyObj?.price),
+        fee: firstString(anyObj?.fee),
+        feeCurrency: firstString(anyObj?.feeCurrency),
+        priceSource: firstString(anyObj?.priceSource),
+        priceAsOf: firstString(anyObj?.priceAsOf),
+        orderId: firstString(anyObj?.orderId),
+        externalRef: firstString(anyObj?.externalRef),
+        idempotencyKey: firstString(anyObj?.idempotencyKey),
+    };
+    return obj;
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'POST') {
-        res.status(405).json({ error: 'Method Not Allowed' })
-        return
+        res.status(405).json({ error: 'Method Not Allowed' });
+        return;
     }
 
     try {
-        // 레이트 리밋(선호: userId+ip 기준, 분당 20회)
-        const rl = getLimiter()
-        const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? 'local')
-        // body를 미리 읽어야 userId 키 조합 가능 → 일단 라이트하게 ip 기반으로 한번 컷
-        const pre = await rl.limit(`trade:create:ip:${ip}`)
+        const rl = getLimiter();
+        const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? 'local');
+        const pre = await rl.limit(`trade:create:ip:${ip}`);
         if (!pre.success) {
-            res.status(429).json({ error: 'rate_limited', limit: pre.limit, remaining: pre.remaining, reset: pre.reset })
-            return
+            res.status(429).json({ error: 'rate_limited', limit: pre.limit, remaining: pre.remaining, reset: pre.reset });
+            return;
         }
 
-        const input = CreateTradeSchema.parse(req.body)
+        const rawInput = coerceFromAny(req.body ?? {});
+        const parsed = CreateTradeSchema.parse({
+            ...rawInput,
+            userId: Number(rawInput.userId),
+        });
 
-        // 두번째 컷: userId + ip 조합
-        const post = await rl.limit(`trade:create:${input.userId}:${ip}`)
-        if (!post.success) {
-            res.status(429).json({ error: 'rate_limited', limit: post.limit, remaining: post.remaining, reset: post.reset })
-            return
+        // MARKET은 priceAsOf 필수
+        if (parsed.orderType === 'MARKET' && !parsed.priceAsOf) {
+            res.status(400).json({ error: 'priceAsOf is required for MARKET orders' });
+            return;
         }
 
-        // 정책: MARKET은 priceAsOf가 있는 게 바람직
-        if (input.orderType === 'MARKET' && !input.priceAsOf) {
-            // 운영정책에 따라 허용할 수도 있음. 여기선 엄격모드로 400 반환.
-            res.status(400).json({ error: 'priceAsOf is required for MARKET orders' })
-            return
+        // 멱등
+        const begin = await ensureIdempotentBegin(parsed.userId, parsed.idempotencyKey, 'trade:create');
+        if (begin.state === 'PROCESSING') {
+            res.status(409).json({ error: 'duplicate_request', processing: true });
+            return;
+        }
+        if (begin.state === 'DONE') {
+            res.status(200).json(begin.row.response ?? { ok: true, reused: true });
+            return;
         }
 
-        const assetId = await getAssetIdOrThrow(String(input.symbol))
+        // 기초 값/정규화
+        const assetId = await getAssetIdOrThrow(String(parsed.symbol));
+        const symbolUpper = String(parsed.symbol).toUpperCase();
 
-        // 중복 방지
-        await ensureIdempotent(input.userId, input.idempotencyKey ?? '', 'trade:create')
+        // 금액 계산 (Decimal)
+        const priceDec = new Prisma.Decimal(parsed.price);
+        const qtyDec   = new Prisma.Decimal(parsed.quantity);
+        const feeDec   = new Prisma.Decimal(parsed.fee ?? '0');
 
-        // 트랜잭션: Trade 기록 + 잔고 증감
-        const trade = await prisma.$transaction(async (tx) => {
-            const created = await tx.trade.create({
+        const gross = priceDec.mul(qtyDec);
+        const isKrwFee = (parsed.feeCurrency ?? 'KRW').toUpperCase() === 'KRW';
+        const feeKrw = isKrwFee ? feeDec : new Prisma.Decimal(0);
+
+        // 매수: -(gross + fee), 매도: +(gross - fee)
+        const deltaKrw = parsed.side === 'BUY'
+            ? gross.plus(feeKrw).neg()
+            : gross.minus(feeKrw);
+
+        // ===== 트랜잭션 시작 =====
+        const result = await prisma.$transaction(async (tx) => {
+            // 0) 레이트리밋 2차: userId + ip
+            const post = await rl.limit(`trade:create:${parsed.userId}:${ip}`);
+            if (!post.success) {
+                throw Object.assign(new Error('rate_limited'), { statusCode: 429, meta: post });
+            }
+
+            // 1) SELL 시 보유 확인(+행 잠금)
+            const qtyNum = Number(parsed.quantity);
+
+            if (parsed.side === 'SELL') {
+                // 행 잠금: 해당 보유행을 FOR UPDATE
+                // prisma.$queryRaw 사용 – Postgres
+                const rows: Array<{ id: number; amount: number }> =
+                    await tx.$queryRaw`
+                        SELECT id, amount
+                        FROM "Holding"
+                        WHERE "userId" = ${parsed.userId} AND "symbol" = ${symbolUpper}
+                        FOR UPDATE
+                    `;
+
+                const found = rows[0];
+                const currentAmt = found ? Number(found.amount) : 0;
+
+                if (currentAmt + 1e-12 < qtyNum) {
+                    // 보유 부족 → 실패
+                    throw Object.assign(new Error('insufficient_holding'), { statusCode: 400 });
+                }
+
+                // 감소
+                const nextAmt = currentAmt - qtyNum;
+                await tx.holding.update({
+                    where: { id: found.id },
+                    data: { amount: nextAmt },
+                });
+            }
+
+            // 2) BUY 시 보유 upsert(+행 잠금)
+            if (parsed.side === 'BUY') {
+                const rows: Array<{ id: number; amount: number }> =
+                    await tx.$queryRaw`
+                        SELECT id, amount
+                        FROM "Holding"
+                        WHERE "userId" = ${parsed.userId} AND "symbol" = ${symbolUpper}
+                        FOR UPDATE
+                    `;
+
+                const found = rows[0];
+                if (found) {
+                    const nextAmt = Number(found.amount) + Number(qtyNum);
+                    await tx.holding.update({
+                        where: { id: found.id },
+                        data: { amount: nextAmt },
+                    });
+                } else {
+                    await tx.holding.create({
+                        data: {
+                            userId: parsed.userId,
+                            symbol: symbolUpper,
+                            amount: qtyNum,
+                        },
+                    });
+                }
+            }
+
+            // 3) 거래 기록
+            const createdTrade = await tx.trade.create({
                 data: {
-                    userId: input.userId,
+                    userId: parsed.userId,
                     assetId,
-                    side: input.side,
-                    orderType: input.orderType,      // ✅ 신규 저장
-                    quantity: input.quantity,
-                    price: input.price,              // 체결가(시장가/지정가 공통)
-                    fee: input.fee ?? '0',
-                    feeCurrency: input.feeCurrency,
+                    side: parsed.side,
+                    orderType: parsed.orderType,
+                    quantity: parsed.quantity, // Decimal 컬럼: string 허용
+                    price: parsed.price,
+                    fee: parsed.fee ?? '0',
+                    feeCurrency: parsed.feeCurrency,
                     executedAt: new Date(),
-                    priceSource: input.priceSource,
-                    priceAsOf: input.priceAsOf ? new Date(input.priceAsOf) : new Date(),
-                    orderId: input.orderId ?? null,
-                    externalRef: input.externalRef ?? null,
+                    priceSource: parsed.priceSource,
+                    priceAsOf: parsed.priceAsOf ? new Date(parsed.priceAsOf) : new Date(),
+                    orderId: parsed.orderId ?? null,
+                    externalRef: parsed.externalRef ?? null,
                 },
-            })
+            });
 
-            const sign = input.side === 'BUY' ? 1 : -1
-            await incrUserAssetBalance(input.userId, assetId, input.quantity, sign as 1 | -1)
+            // 4) (선택) 기존 내부 자산테이블도 관리 중이라면 계속 호출
+            const sign = parsed.side === 'BUY' ? 1 : -1;
+            await incrUserAssetBalance(parsed.userId, assetId, parsed.quantity, sign as 1 | -1).catch(() => { /* 외부 테이블 없으면 무시 */ });
 
-            return created
-        })
+            // 5) KRW 잔액 증감 (User.balance: Decimal)
+            const updatedUser = await tx.user.update({
+                where: { id: parsed.userId },
+                data: {
+                    balance: { increment: deltaKrw }, // Decimal 증감
+                },
+                select: { id: true, balance: true },
+            });
 
-        res.status(200).json({ ok: true, trade })
+            return { createdTrade, updatedUser };
+        });
+        // ===== 트랜잭션 끝 =====
+
+        const responsePayload = {
+            ok: true,
+            trade: result.createdTrade,
+            nextBalance: result.updatedUser.balance, // Prisma Decimal → 문자열 직렬화
+        };
+
+        await ensureIdempotentEnd(parsed.userId, parsed.idempotencyKey, 'trade:create', responsePayload);
+        res.status(200).json(responsePayload);
     } catch (e: any) {
-        const status = e?.statusCode ?? 500
-        res.status(status).json({ error: e?.message ?? 'internal error' })
+        const status = e?.statusCode ?? e?.status ?? 500;
+        const message =
+            e?.message === 'insufficient_holding'
+                ? '보유 수량이 부족하여 매도할 수 없습니다.'
+                : e?.message === 'rate_limited'
+                    ? 'rate_limited'
+                    : (e?.message ?? 'internal error');
+
+        res.status(status).json({ error: message });
     }
 }

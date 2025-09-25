@@ -13,7 +13,7 @@ model User {
   email     String    @unique
   password  String
   createdAt DateTime  @default(now())
-  balance   Float     @default(0.0)
+  balance  Decimal  @db.Decimal(65, 30)
 
   holdings          Holding[]
   trades            Trade[]
@@ -181,12 +181,22 @@ enum MessageAuthor {
   ADMIN
 }
 
-model IdempotencyKey {
-  id        Int      @id @default(autoincrement())
-  key       String   @unique
-  purpose   String   // 'trade:create' | 'transfer:create' | 'ticket:create' 등
-  userId    Int
-  createdAt DateTime @default(now())
+// === 멱등키 관리용 ===
+enum IdemStatus {
+    PROCESSING
+    DONE
+}
 
-  @@index([userId, purpose])
+model IdempotencyKey {
+    id          Int         @id @default(autoincrement())
+    userId      Int
+    scope       String
+    key         String
+    status      IdemStatus  @default(PROCESSING)
+    response    Json?
+    createdAt   DateTime    @default(now())
+    updatedAt   DateTime    @updatedAt
+
+    @@unique([userId, scope, key])
+    @@index([createdAt])
 }

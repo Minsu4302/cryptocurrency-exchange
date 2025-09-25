@@ -1,4 +1,4 @@
-// coin/[id]/page.tsx
+// app/coin/[id]/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -40,20 +40,31 @@ export default function CoinPage() {
     const [error, setError] = useState<string | null>(null);
     const { theme } = useTheme();
 
-    // 매수/매도
     const [orderType, setOrderType] = useState<'buy' | 'sell'>('buy');
-
-    // 주문유형: 시장가 / 지정가
     const [priceType, setPriceType] = useState<'market' | 'limit'>('limit');
-
-    // 사용자 잔액 (KRW)
     const [userBalance, setUserBalance] = useState<number>(0);
-
-    // 주문 수량
     const [qty, setQty] = useState<string>("");
-
-    // 가격 입력 상태
     const [priceInput, setPriceInput] = useState<number>(0);
+    const [submitting, setSubmitting] = useState<boolean>(false);
+    const [userId, setUserId] = useState<number | null>(null);
+
+    function persistBalance(nextBal: number) {
+        setUserBalance(nextBal);
+        try {
+            const raw = localStorage.getItem('AUTH');
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            parsed.balance = nextBal;
+            localStorage.setItem('AUTH', JSON.stringify(parsed));
+        } catch {}
+    }
+
+    function newIdemKey(uid: number) {
+        if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+            return crypto.randomUUID();
+        }
+        return `${uid}-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    }
 
     useEffect(() => {
         fetch(`/api/coins/${id}`)
@@ -65,17 +76,75 @@ export default function CoinPage() {
             .catch(() => setError('네트워크가 불안정합니다. 잠시 후 다시 시도해 주세요.'));
     }, [id]);
 
-    // 로컬스토리지에서 사용자 잔액 로드
     useEffect(() => {
-        try {
-            const raw = localStorage.getItem("AUTH");
-            if (!raw) return;
-            const parsed = JSON.parse(raw);
-            const b = Number(parsed?.balance ?? 0);
-            if (!Number.isNaN(b)) {
-                setUserBalance(b);
+        function toNum(v: unknown): number | null {
+            if (v == null) return null;
+            if (typeof v === 'number' && Number.isFinite(v)) return v;
+            if (typeof v === 'string' && v.trim() !== '') {
+                const n = Number(v);
+                return Number.isFinite(n) ? n : null;
             }
-        } catch {}
+            return null;
+        }
+
+        async function boot() {
+            try {
+                const candidateKeys = ['AUTH', 'auth', 'USER', 'user', 'SESSION', 'session'];
+                let raw: string | null = null;
+                for (const k of candidateKeys) {
+                    const v = localStorage.getItem(k);
+                    if (v) { raw = v; break; }
+                }
+                if (!raw) return;
+
+                const parsed = JSON.parse(raw);
+
+                const balCandidates: unknown[] = [
+                    parsed?.balance,
+                    parsed?.wallet?.krw,
+                    parsed?.funds?.krw,
+                    parsed?.user?.balance
+                ];
+                let bal: number = 0;
+                for (const c of balCandidates) {
+                    const n = toNum(c);
+                    if (n != null) { bal = n; break; }
+                }
+                setUserBalance(bal);
+
+                const directUidCandidates: unknown[] = [
+                    parsed?.userId,
+                    parsed?.id,
+                    parsed?.uid,
+                    parsed?.sub,
+                    parsed?.user?.id,
+                    parsed?.user?.userId
+                ];
+                let uid: number | null = null;
+                for (const c of directUidCandidates) {
+                    uid = toNum(c);
+                    if (uid != null) break;
+                }
+
+                if (uid != null) {
+                    setUserId(uid);
+                    return;
+                }
+
+                const email: string | undefined = parsed?.email ?? parsed?.user?.email ?? parsed?.account?.email;
+                if (email && typeof email === 'string') {
+                    const r = await fetch(`/api/users/resolve-by-email?email=${encodeURIComponent(email)}`);
+                    if (r.ok) {
+                        const j = await r.json();
+                        if (j?.userId && Number.isFinite(Number(j.userId))) {
+                            setUserId(Number(j.userId));
+                        }
+                    }
+                }
+            } catch {}
+        }
+
+        boot();
     }, []);
 
     const priceKRW = useMemo(() => coin?.market_data.current_price.krw ?? 0, [coin]);
@@ -153,8 +222,8 @@ export default function CoinPage() {
         setPriceInput(num);
     };
 
-    const stepPriceUp = () => setPriceInput(prev => prev + 1000);
-    const stepPriceDown = () => setPriceInput(prev => prev - 1000);
+    const stepPriceUp = () => setPriceInput(prev => Math.max(0, prev + 1000));
+    const stepPriceDown = () => setPriceInput(prev => Math.max(0, prev - 1000));
 
     const qtyNum = (() => {
         const n = Number(qty);
@@ -166,6 +235,85 @@ export default function CoinPage() {
     const handleSelectPriceType = (type: 'market' | 'limit') => {
         setPriceType(type);
         if (type === 'market') setQty("");
+    };
+
+    const handleSubmitOrder = async () => {
+        if (submitting) return;
+        if (!coin) {
+            alert('코인 정보가 로드되지 않았습니다. 잠시 후 다시 시도하세요.');
+            return;
+        }
+        if (userId == null) {
+            const debug = localStorage.getItem('AUTH');
+            console.log('[AUTH debug]', debug);
+            alert('로그인 세션을 확인하지 못했습니다. 새로고침 후 다시 시도하세요.');
+            return;
+        }
+
+        const side = orderType === 'buy' ? 'BUY' : 'SELL';
+        const orderKind = priceType === 'market' ? 'MARKET' : 'LIMIT';
+
+        if (orderKind === 'LIMIT') {
+            if (priceInput <= 0) {
+                alert('가격을 올바르게 입력하세요.');
+                return;
+            }
+            if (!qty || Number(qty) <= 0) {
+                alert('수량을 올바르게 입력하세요.');
+                return;
+            }
+        } else {
+            if (!qty || Number(qty) <= 0) {
+                alert('시장가 주문 수량을 입력하세요.');
+                return;
+            }
+        }
+
+        const nowIso = new Date().toISOString();
+        const idemKey = newIdemKey(userId!);
+
+        const payload = {
+            userId,
+            symbol: coin.symbol.toUpperCase(),
+            side,
+            orderType: orderKind,
+            quantity: String(Number(qty)),
+            price: String(orderKind === 'MARKET' ? priceKRW : priceInput),
+            fee: '0',
+            feeCurrency: 'KRW',
+            priceSource: 'coingecko',
+            ...(orderKind === 'MARKET' ? { priceAsOf: nowIso } : {}),
+            idempotencyKey: idemKey
+        };
+
+        try {
+            setSubmitting(true);
+
+            const res = await fetch('/api/trades/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                alert(`주문 실패: ${data?.error ?? 'unknown'}`);
+                return;
+            }
+
+            const data = await res.json();
+
+            const nextBalanceFromServer = Number(data?.nextBalance);
+            if (Number.isFinite(nextBalanceFromServer)) {
+                persistBalance(Math.max(0, Math.floor(nextBalanceFromServer)));
+            }
+
+            alert('주문이 체결되었습니다.');
+        } catch (e: any) {
+            alert('요청 중 오류가 발생했습니다.');
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -323,9 +471,33 @@ export default function CoinPage() {
                                     </div>
                                 </>
                             )}
+
+                            {priceType === 'market' && (
+                                <>
+                                    <div className="item">
+                                        <p className="str">주문수량</p>
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            min="0"
+                                            className="orderNum"
+                                            placeholder="0"
+                                            value={qty}
+                                            onChange={(e) => setQty(e.target.value)}
+                                            style={{ textAlign: 'right' }}
+                                        />
+                                    </div>
+                                </>
+                            )}
                         </div>
 
-                        <button className="order_btn">주문하기</button>
+                        <button
+                            className="order_btn"
+                            onClick={handleSubmitOrder}
+                            disabled={submitting}
+                        >
+                            {submitting ? '전송중...' : '주문하기'}
+                        </button>
                     </div>
                 </div>
             </div>
