@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
 
+
 :root{
     --background-color: #fff;
     --background-color-primary: #fff;
@@ -263,6 +264,10 @@ nav .right-section a{
 nav .right-section a.active,
 nav .right-section a:hover{
     background: var(--background-color-secondary);
+    color: var(--color-white);
+}
+
+nav .right-section .account {
     color: var(--color-white);
 }
 

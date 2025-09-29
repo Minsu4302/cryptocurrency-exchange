@@ -111,6 +111,7 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
         window.location.href = '/';
     };
 
+    // ✅ 글로벌 데이터: 외부 API 직접 호출 → 내부 라우트(`/api/coins/global`) 사용
     useEffect(() => {
         const localStorageKey = 'Global_Data';
         const stored = localStorage.getItem(localStorageKey);
@@ -118,16 +119,23 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
         if (stored) {
             const parsed = JSON.parse(stored);
             if (Date.now() - parsed.timestamp < 300000) {
-                setGlobalData(parsed.data);
+                setGlobalData(parsed.data as GlobalData);
                 return;
             }
         }
 
-        fetch('https://api.coingecko.com/api/v3/global')
+        fetch('/api/coins/global', { cache: 'no-store' })
             .then(res => res.json())
             .then(data => {
-                setGlobalData(data.data);
-                localStorage.setItem(localStorageKey, JSON.stringify({ timestamp: Date.now(), data: data.data }));
+                // CoinGecko /global 응답은 { data: {...} } 형태
+                const payload: GlobalData | null = data?.data ?? null;
+                setGlobalData(payload);
+                if (payload) {
+                    localStorage.setItem(
+                        localStorageKey,
+                        JSON.stringify({ timestamp: Date.now(), data: payload })
+                    );
+                }
             })
             .catch(() => setGlobalData(null));
     }, []);
@@ -155,11 +163,15 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
 
             <div className="main">
                 <div className="global">
-                    <p>Coins: <b>{globalData?.active_cryptocurrencies || 'N/A'}</b></p>
-                    <p>Exchanges: <b>{globalData?.markets || 'N/A'}</b></p>
+                    <p>Coins: <b>{globalData?.active_cryptocurrencies ?? 'N/A'}</b></p>
+                    <p>Exchanges: <b>{globalData?.markets ?? 'N/A'}</b></p>
                     <p>
                         Market Cap: <span>
-                            <b>{globalData?.total_market_cap?.krw ? `${(globalData.total_market_cap.krw / 1e12).toFixed(3)}조 원` : 'N/A'}</b>
+                            <b>
+                                {globalData?.total_market_cap?.krw
+                                    ? `${(globalData.total_market_cap.krw / 1e12).toFixed(3)}조 원`
+                                    : 'N/A'}
+                            </b>
                             <span id="marketCapChange">
                                 {typeof globalData?.market_cap_change_percentage_24h_usd === 'number'
                                     ? `${globalData.market_cap_change_percentage_24h_usd.toFixed(1)}%`
@@ -170,8 +182,20 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
                             </span>
                         </span>
                     </p>
-                    <p>24H Vol: <b>{globalData?.total_volume?.krw ? `${(globalData.total_volume.krw / 1e9).toFixed(3)}억 원` : 'N/A'}</b></p>
-                    <p>Dominance: <b>{`BTC ${globalData?.market_cap_percentage?.btc?.toFixed(1) || 'N/A'}% - ETH ${globalData?.market_cap_percentage?.eth?.toFixed(1) || 'N/A'}%`}</b></p>
+                    <p>
+                        24H Vol:{' '}
+                        <b>
+                            {globalData?.total_volume?.krw
+                                ? `${(globalData.total_volume.krw / 1e9).toFixed(3)}억 원`
+                                : 'N/A'}
+                        </b>
+                    </p>
+                    <p>
+                        Dominance:{' '}
+                        <b>
+                            {`BTC ${globalData?.market_cap_percentage?.btc?.toFixed(1) ?? 'N/A'}% - ETH ${globalData?.market_cap_percentage?.eth?.toFixed(1) ?? 'N/A'}%`}
+                        </b>
+                    </p>
                 </div>
 
                 <nav>
@@ -221,7 +245,13 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
                                 <br />
                                 <span className="balance">
                                     보유 금액:{' '}
-                                    <b>{new Intl.NumberFormat('ko-KR').format(Number(user.balance ?? 0))}원</b>
+                                    {/* ✅ 소수점 “내림(버림)” + 정수 포맷 */}
+                                    <b>
+                                        {
+                                            new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 })
+                                                .format(Math.floor(Number(user.balance ?? 0)))
+                                        }원
+                                    </b>
                                 </span>
                             </div>
                         ) : (
