@@ -1,16 +1,27 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import prisma from '../../../lib/prisma'
 import { incrUserAssetBalance } from '../../../lib/wallet'
+import {
+    respondMethodNotAllowed,
+    respondBadRequest,
+    respondSuccess,
+    respondInternalError,
+    type ApiErrorResponse,
+    type ApiSuccessResponse,
+} from '../../../lib/api-response'
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse<ApiErrorResponse | ApiSuccessResponse>
+) {
     if (req.method !== 'POST') {
-        res.status(405).json({ error: 'Method Not Allowed' })
+        respondMethodNotAllowed(res, ['POST'])
         return
     }
 
     const { id } = req.body ?? {}
     if (!id) {
-        res.status(400).json({ error: 'id required' })
+        respondBadRequest(res, 'ID가 필수입니다')
         return
     }
 
@@ -27,8 +38,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return t
         })
 
-        res.status(200).json({ ok: true, transfer: result })
-    } catch (e: any) {
-        res.status(500).json({ error: e?.message ?? 'internal error' })
+        respondSuccess(res, { transfer: result })
+    } catch (error) {
+        console.error('Mark transfer success error:', error)
+        respondInternalError(res, '송금 상태 업데이트 중 오류가 발생했습니다')
     }
 }

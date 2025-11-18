@@ -1,26 +1,28 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import prisma from '../../../lib/prisma'
 import { getAssetIdOrThrow } from '../../../lib/assets'
+import {
+    respondMethodNotAllowed,
+    respondBadRequest,
+    respondSuccess,
+    respondInternalError,
+    type ApiErrorResponse,
+    type ApiSuccessResponse,
+} from '../../../lib/api-response'
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse<ApiErrorResponse | ApiSuccessResponse>
+) {
     if (req.method !== 'POST') {
-        res.status(405).json({ error: 'Method Not Allowed' })
+        respondMethodNotAllowed(res, ['POST'])
         return
     }
 
-    const {
-        userId,
-        symbol,
-        type,               // 'DEPOSIT' | 'WITHDRAWAL'
-        amount,             // string decimal
-        fee,
-        network,
-        address,
-        txId,
-    } = req.body ?? {}
+    const { userId, symbol, type, amount, fee, network, address, txId } = req.body ?? {}
 
     if (!userId || !symbol || !type || !amount) {
-        res.status(400).json({ error: 'missing fields' })
+        respondBadRequest(res, '필수 필드가 누락되었습니다')
         return
     }
 
@@ -40,8 +42,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 requestedAt: new Date(),
             },
         })
-        res.status(200).json({ ok: true, transfer: rec })
-    } catch (e: any) {
-        res.status(500).json({ error: e?.message ?? 'internal error' })
+        respondSuccess(res, { transfer: rec }, 201)
+    } catch (error) {
+        console.error('Transfer creation error:', error)
+        respondInternalError(res, '송금 요청 생성 중 오류가 발생했습니다')
     }
 }

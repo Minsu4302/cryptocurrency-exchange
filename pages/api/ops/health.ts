@@ -1,20 +1,41 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import prisma from '../../../lib/prisma'
 import { getRedis } from '../../../lib/redis'
+import {
+    respondMethodNotAllowed,
+    respondSuccess,
+    respondInternalError,
+    type ApiErrorResponse,
+    type ApiSuccessResponse,
+} from '../../../lib/api-response'
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse<ApiErrorResponse | ApiSuccessResponse>
+) {
     if (req.method !== 'GET') {
-        res.status(405).json({ error: 'Method Not Allowed' })
+        respondMethodNotAllowed(res, ['GET'])
         return
     }
 
     try {
         await prisma.$queryRaw`SELECT 1`
         const redis = getRedis()
-        await redis.set('health:ping', '1', { ex: 10 })
-        const pong = await redis.get('health:ping')
-        res.status(200).json({ ok: true, db: 'ok', redis: pong === '1' ? 'ok' : 'fail' })
-    } catch (e: any) {
-        res.status(500).json({ ok: false, error: e?.message ?? 'internal error' })
+        const redisStatus = redis ? 'ok' : 'unavailable'
+        if (redis) {
+            try {
+                await redis.set('health:ping', '1', { ex: 10 })
+                const pong = await redis.get('health:ping')
+                if (pong !== '1') {
+                    throw new Error('Redis check failed')
+                }
+            } catch {
+                // Redis는 선택사항이므로 실패해도 계속
+            }
+        }
+        respondSuccess(res, { db: 'ok', redis: redisStatus })
+    } catch (error) {
+        console.error('Health check error:', error)
+        respondInternalError(res, '헬스 체크 실패')
     }
 }

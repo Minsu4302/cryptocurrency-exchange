@@ -1,7 +1,7 @@
 // lib/api-cache.ts
-import type { NextApiRequest, NextApiResponse } from 'next';
-import { getEntry, setEntry, acquireLock, releaseLock } from './cache';
-import { getRedis } from '../lib/redis';
+import type { NextApiRequest, NextApiResponse } from 'next'
+import { getEntry, setEntry, acquireLock, releaseLock } from './cache'
+import { getRedis } from './redis'
 
 // ───────────────────────────────────────────────────────────────────────────────
 // 환경 상수

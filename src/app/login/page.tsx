@@ -1,97 +1,91 @@
 // app/login/page.tsx
-"use client";
+'use client'
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useTheme } from "../../context/ThemeContext";
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { useTheme } from '../../context/ThemeContext'
 
 export default function LoginPage() {
-    const { theme } = useTheme();
-    const [bgColor, setBgColor] = useState<string>("");
-    const [email, setEmail] = useState("");
-    const [pw, setPw] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [err, setErr] = useState<string | null>(null);
+    const { theme } = useTheme()
+    const [bgColor, setBgColor] = useState<string>('')
+    const [email, setEmail] = useState('')
+    const [pw, setPw] = useState('')
+    const [loading, setLoading] = useState(false)
+    const [err, setErr] = useState<string | null>(null)
 
     useEffect(() => {
-        const isDark = theme !== "light-theme";
-        const root = getComputedStyle(document.documentElement);
+        const isDark = theme !== 'light-theme'
+        const root = getComputedStyle(document.documentElement)
         const backgroundColor = root
-            .getPropertyValue(isDark ? "--chart-dark-bg" : "--chart-light-bg")
-            .trim();
-        setBgColor(backgroundColor);
-    }, [theme]);
+            .getPropertyValue(isDark ? '--chart-dark-bg' : '--chart-light-bg')
+            .trim()
+        setBgColor(backgroundColor)
+    }, [theme])
 
     async function onSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        if (loading) return;
+        e.preventDefault()
+        if (loading) return
 
-        setErr(null);
-        setLoading(true);
+        setErr(null)
+        setLoading(true)
 
         try {
-            if (!email.includes("@") || pw.length < 6) {
-                throw new Error("입력 정보를 다시 확인해 주세요.");
+            if (!email.includes('@') || pw.length < 6) {
+                throw new Error('입력 정보를 다시 확인해 주세요.')
             }
 
             // 1) 실제 로그인 요청
-            const res = await fetch("/api/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include", // 쿠키 왕복
-                body: JSON.stringify({ email, password: pw })
-            });
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ email, password: pw }),
+            })
 
-            const data = await res.json().catch(() => ({} as any));
+            const data = await res.json().catch(() => ({}))
             if (!res.ok) {
-                throw new Error(data?.message || "로그인 실패");
+                throw new Error(data?.message || data?.error || '로그인 실패')
             }
 
             // 2) 헤더 즉시 반영을 위해 로컬 저장
-            const balanceFromLogin =
-                typeof data?.balance === "number" ? data.balance : 0;
-            localStorage.setItem(
-                "AUTH",
-                JSON.stringify({ email, balance: balanceFromLogin })
-            );
+            const balanceFromLogin = typeof data?.data?.balance === 'number' ? data.data.balance : 0
+            localStorage.setItem('AUTH', JSON.stringify({ email, balance: balanceFromLogin }))
 
             // 3) 세션 쿠키 확인용 /api/me 호출(선택)
             try {
-                // /api/login 응답에 token이 있다면 Authorization 헤더도 세팅
-                const meHeaders: Record<string, string> = {};
-                if (data?.token) {
-                    meHeaders["Authorization"] = `Bearer ${data.token}`;
+                const meHeaders: Record<string, string> = {}
+                if (data?.data?.token) {
+                    meHeaders['Authorization'] = `Bearer ${data.data.token}`
                 }
-                const me = await fetch("/api/me", {
-                    credentials: "include",
-                    cache: "no-store",
+                const me = await fetch('/api/me', {
+                    credentials: 'include',
+                    cache: 'no-store',
                     headers: meHeaders,
-                });
+                })
                 if (me.ok) {
-                    const meData = await me.json();
-                    // /api/me는 { user: {...} } 형태로 내려옴. 혹시 평면 형태도 대비.
-                    const u = meData?.user ?? meData;
+                    const meData = await me.json()
+                    const u = meData?.data?.user ?? meData?.user ?? meData
                     if (u?.email) {
                         localStorage.setItem(
-                            "AUTH",
+                            'AUTH',
                             JSON.stringify({
                                 email: u.email,
-                                balance:
-                                    typeof u.balance === "number"
-                                        ? u.balance
-                                        : balanceFromLogin
+                                balance: typeof u.balance === 'number' ? u.balance : balanceFromLogin,
                             })
-                        );
+                        )
                     }
                 }
-            } catch {}
+            } catch {
+                // /api/me 실패는 무시 (로그인 자체는 성공)
+            }
 
             // 4) 이동
-            window.location.assign("/");
-        } catch (e: any) {
-            setErr(e.message ?? "문제가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+            window.location.assign('/')
+        } catch (e) {
+            const message = e instanceof Error ? e.message : '문제가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+            setErr(message)
         } finally {
-            setLoading(false);
+            setLoading(false)
         }
     }
 

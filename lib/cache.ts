@@ -1,5 +1,5 @@
 // lib/cache.ts
-import { getRedis } from '../lib/redis';
+import { getRedis } from './redis'
 
 export type CacheEntry<T = any> = {
     value: T;

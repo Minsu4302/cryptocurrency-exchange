@@ -1,6 +1,6 @@
 // lib/wallet.ts
 import { Prisma } from '@prisma/client'
-import { getRedis } from '../lib/redis'
+import { getRedis } from './redis'
 
 const redis = getRedis()
 

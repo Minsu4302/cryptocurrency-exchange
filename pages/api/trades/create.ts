@@ -1,12 +1,13 @@
 // pages/api/trades/create.ts
-import type { NextApiRequest, NextApiResponse } from 'next';
-import prisma from '../../../lib/prisma';
-import { getAssetIdOrThrow } from '../../../lib/assets';
-import { incrUserAssetBalance } from '../../../lib/wallet'; // 기존 사용 중이면 유지
-import { getLimiter } from '../../../lib/ratelimit';
-import { ensureIdempotentBegin, ensureIdempotentEnd } from '../../../lib/idempotency';
-import { z } from 'zod';
-import { Prisma } from '@prisma/client';
+import type { NextApiRequest, NextApiResponse } from 'next'
+import prisma from '../../../lib/prisma'
+import { getAssetIdOrThrow } from '../../../lib/assets'
+import { incrUserAssetBalance } from '../../../lib/wallet'
+import { getLimiter } from '../../../lib/ratelimit'
+import { ensureIdempotentBegin, ensureIdempotentEnd } from '../../../lib/idempotency'
+import { z } from 'zod'
+import { Prisma } from '@prisma/client'
+import { respondMethodNotAllowed, respondRateLimited, respondBadRequest, respondSuccess, respondInternalError, type ApiErrorResponse, type ApiSuccessResponse } from '../../../lib/api-response'
 
 const CreateTradeSchema = z.object({
     userId: z.number().int().positive(),
@@ -51,19 +52,24 @@ function coerceFromAny(anyObj: any) {
     return obj;
 }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+import { respondMethodNotAllowed, respondRateLimited, respondBadRequest, respondSuccess, respondInternalError, type ApiErrorResponse, type ApiSuccessResponse } from '../../../lib/api-response'
+
+export default async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse<ApiErrorResponse | ApiSuccessResponse>
+) {
     if (req.method !== 'POST') {
-        res.status(405).json({ error: 'Method Not Allowed' });
-        return;
+        respondMethodNotAllowed(res, ['POST'])
+        return
     }
 
     try {
-        const rl = getLimiter();
-        const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? 'local');
-        const pre = await rl.limit(`trade:create:ip:${ip}`);
+        const rl = getLimiter()
+        const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? 'local')
+        const pre = await rl.limit(`trade:create:ip:${ip}`)
         if (!pre.success) {
-            res.status(429).json({ error: 'rate_limited', limit: pre.limit, remaining: pre.remaining, reset: pre.reset });
-            return;
+            respondRateLimited(res, Math.ceil((pre.reset - Date.now()) / 1000))
+            return
         }
 
         const rawInput = coerceFromAny(req.body ?? {});
@@ -74,19 +80,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         // MARKET은 priceAsOf 필수
         if (parsed.orderType === 'MARKET' && !parsed.priceAsOf) {
-            res.status(400).json({ error: 'priceAsOf is required for MARKET orders' });
-            return;
+            respondBadRequest(res, 'MARKET 주문은 priceAsOf가 필수입니다')
+            return
         }
 
         // 멱등
-        const begin = await ensureIdempotentBegin(parsed.userId, parsed.idempotencyKey, 'trade:create');
+        const begin = await ensureIdempotentBegin(parsed.userId, parsed.idempotencyKey, 'trade:create')
         if (begin.state === 'PROCESSING') {
-            res.status(409).json({ error: 'duplicate_request', processing: true });
-            return;
+            respondBadRequest(res, '같은 요청이 처리 중입니다')
+            return
         }
         if (begin.state === 'DONE') {
-            res.status(200).json(begin.row.response ?? { ok: true, reused: true });
-            return;
+            respondSuccess(res, begin.row.response ?? { ok: true, reused: true })
+            return
         }
 
         // 기초 값/정규화
@@ -213,19 +219,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             ok: true,
             trade: result.createdTrade,
             nextBalance: result.updatedUser.balance, // Prisma Decimal → 문자열 직렬화
-        };
+        }
 
-        await ensureIdempotentEnd(parsed.userId, parsed.idempotencyKey, 'trade:create', responsePayload);
-        res.status(200).json(responsePayload);
-    } catch (e: any) {
-        const status = e?.statusCode ?? e?.status ?? 500;
-        const message =
-            e?.message === 'insufficient_holding'
-                ? '보유 수량이 부족하여 매도할 수 없습니다.'
-                : e?.message === 'rate_limited'
-                    ? 'rate_limited'
-                    : (e?.message ?? 'internal error');
+        await ensureIdempotentEnd(parsed.userId, parsed.idempotencyKey, 'trade:create', responsePayload)
+        respondSuccess(res, responsePayload)
+    } catch (error) {
+        console.error('Trade creation error:', error)
 
-        res.status(status).json({ error: message });
+        if (error instanceof Error) {
+            if (error.message === 'insufficient_holding') {
+                respondBadRequest(res, '보유 수량이 부족하여 매도할 수 없습니다')
+                return
+            }
+            if (error.message === 'rate_limited') {
+                respondRateLimited(res, 60)
+                return
+            }
+        }
+
+        respondInternalError(res, '거래 생성 중 오류가 발생했습니다')
     }
 }

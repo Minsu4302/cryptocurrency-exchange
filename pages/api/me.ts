@@ -2,16 +2,30 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import prisma from '../../lib/prisma'
 import { verifyToken } from '../../lib/auth'
+import {
+    respondMethodNotAllowed,
+    respondUnauthorized,
+    respondNotFound,
+    respondSuccess,
+    respondInternalError,
+    type ApiErrorResponse,
+    type ApiSuccessResponse,
+} from '../../lib/api-response'
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse<ApiErrorResponse | ApiSuccessResponse>
+) {
     if (req.method !== 'GET') {
-        return res.status(405).json({ message: 'Method Not Allowed' })
+        respondMethodNotAllowed(res, ['GET'])
+        return
     }
 
     const authHeader = req.headers.authorization
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ message: '토큰이 없습니다.' })
+        respondUnauthorized(res, '토큰이 없습니다')
+        return
     }
 
     const token = authHeader.split(' ')[1]
@@ -30,10 +44,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
 
         if (!user) {
-            return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' })
+            respondNotFound(res, '사용자를 찾을 수 없습니다')
+            return
         }
 
-        return res.status(200).json({
+        respondSuccess(res, {
             user: {
                 id: user.id,
                 email: user.email,
@@ -41,13 +56,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 balance: Number(user.balance ?? 0),
             },
         })
-    } catch (error: unknown) {
-        if (error instanceof Error) {
-            console.error('토큰 검증 실패:', error.message)
-            return res.status(401).json({ message: '유효하지 않은 토큰입니다.' })
-        } else {
-            console.error('알 수 없는 오류 발생')
-            return res.status(500).json({ message: '서버 오류가 발생했습니다.' })
-        }
+    } catch (error) {
+        console.error('토큰 검증 오류:', error)
+        respondUnauthorized(res, '유효하지 않은 토큰입니다')
     }
 }

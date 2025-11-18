@@ -30,52 +30,52 @@ export default function RegisterPage() {
     }, [theme]);
 
     async function onSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        if (loading) return;
+        e.preventDefault()
+        if (loading) return
 
-        setErr(null);
-        setOk(null);
+        setErr(null)
+        setOk(null)
 
         // 클라이언트 측 간단 검증
         if (!email || !pw) {
-            setErr("이메일과 비밀번호를 모두 입력해 주세요.");
-            return;
+            setErr('이메일과 비밀번호를 모두 입력해 주세요.')
+            return
         }
         if (pw.length < 6) {
-            setErr("비밀번호는 6자 이상이어야 합니다.");
-            return;
+            setErr('비밀번호는 6자 이상이어야 합니다.')
+            return
         }
         if (pw !== pw2) {
-            setErr("비밀번호가 일치하지 않습니다.");
-            return;
+            setErr('비밀번호가 일치하지 않습니다.')
+            return
         }
 
-        setLoading(true);
+        setLoading(true)
         try {
-            const res = await fetch("/api/register", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
+            const res = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password: pw }),
-                cache: "no-store",
-            });
+                cache: 'no-store',
+            })
 
-            // API 표준 응답 처리
-            const data = await res.json().catch(() => ({}));
+            const data = await res.json().catch(() => ({}))
 
             if (res.status === 201) {
-                setOk("회원가입 성공! 잠시 후 로그인 페이지로 이동합니다.");
+                setOk('회원가입 성공! 잠시 후 로그인 페이지로 이동합니다.')
                 setTimeout(() => {
-                    window.location.assign("/login");
-                }, 700);
-                return;
+                    window.location.assign('/login')
+                }, 700)
+                return
             }
 
-            // 400/409/500 등
-            setErr(data?.message ?? `요청 실패 (status ${res.status})`);
-        } catch {
-            setErr("네트워크 오류가 발생했습니다.");
+            // 에러 응답 처리
+            setErr(data?.message || data?.error || `요청 실패 (${res.status})`)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '네트워크 오류가 발생했습니다.'
+            setErr(message)
         } finally {
-            setLoading(false);
+            setLoading(false)
         }
     }
 

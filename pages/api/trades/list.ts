@@ -1,9 +1,20 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import prisma from '../../../lib/prisma'
+import {
+    respondMethodNotAllowed,
+    respondBadRequest,
+    respondSuccess,
+    respondInternalError,
+    type ApiErrorResponse,
+    type ApiSuccessResponse,
+} from '../../../lib/api-response'
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse<ApiErrorResponse | ApiSuccessResponse>
+) {
     if (req.method !== 'GET') {
-        res.status(405).json({ error: 'Method Not Allowed' })
+        respondMethodNotAllowed(res, ['GET'])
         return
     }
 
@@ -12,7 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const cursor = req.query.cursor ? { id: Number(req.query.cursor) } : undefined
 
     if (!userId) {
-        res.status(400).json({ error: 'userId required' })
+        respondBadRequest(res, '사용자 ID가 필수입니다')
         return
     }
 
@@ -26,8 +37,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             include: { asset: { select: { symbol: true, name: true } } },
         })
 
-        res.status(200).json({ items: trades, nextCursor: trades.at(-1)?.id ?? null })
-    } catch (e: any) {
-        res.status(500).json({ error: e?.message ?? 'internal error' })
+        respondSuccess(res, { items: trades, nextCursor: trades.at(-1)?.id ?? null })
+    } catch (error) {
+        console.error('Trades list error:', error)
+        respondInternalError(res, '거래 목록 조회 중 오류가 발생했습니다')
     }
 }
