@@ -32,5 +32,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const key = `dash:assets:${vs}:${order}:${per_page}:${page}:${sparkline}`
 
-    return serveWithCache(res, key, async () => fetchUpstream(url))
+    return serveWithCache(res, key, async () => fetchUpstream(url), {
+        freshSec: 30,
+        staleSec: 300,
+        lockSec: 10,
+    })
 }

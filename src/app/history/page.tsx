@@ -397,6 +397,11 @@ export interface Transaction {
     quantity?: number;
     orderTime?: string;
     coin?: string;
+    coinName?: string;
+    price?: number;
+    total?: number;
+    fee?: number;
+    note?: string;
 }
 
 type ApiTrade = {
@@ -464,25 +469,138 @@ export default function HistoryPage() {
             try {
                 setLoading(true);
                 setErr(null);
-                const userId = 1;
+                
+                // 1) 로그인한 사용자 정보 가져오기
+                let userId: number | null = null;
+                let token: string | null = null;
+                
+                // localStorage에서 토큰 추출
+                try {
+                    const authCandidates = [
+                        localStorage.getItem('AUTH'),
+                        localStorage.getItem('auth'),
+                        localStorage.getItem('SESSION'),
+                        localStorage.getItem('session'),
+                        localStorage.getItem('USER'),
+                        localStorage.getItem('user'),
+                    ]
+                    for (const raw of authCandidates) {
+                        if (!raw) continue
+                        try {
+                            const p = JSON.parse(raw)
+                            const possible = [p?.token, p?.accessToken, p?.access_token, p?.idToken, p?.id_token]
+                            const found = possible.find((t) => typeof t === 'string' && String(t).length > 0)
+                            if (found) { token = String(found); break }
+                        } catch {}
+                    }
+                } catch {}
+
+                // 2) /api/me로 userId 가져오기
+                if (token) {
+                    try {
+                        const meRes = await fetch('/api/me', {
+                            method: 'GET',
+                            headers: { 
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json' 
+                            },
+                            credentials: 'include',
+                            cache: 'no-store',
+                        });
+                        
+                        if (meRes.ok) {
+                            const meData = await meRes.json();
+                            const userData = meData?.data?.user ?? meData?.user;
+                            if (userData?.id) {
+                                userId = Number(userData.id);
+                            }
+                        }
+                    } catch {}
+                }
+
+                if (!userId) {
+                    setErr('로그인이 필요합니다. 로그인 후 다시 시도하세요.');
+                    setLoading(false);
+                    return;
+                }
+
+                // 3) 거래 내역과 입출금 내역 병렬로 가져오기
                 const take = 200;
+                const [tradesRes, transfersRes] = await Promise.all([
+                    fetch(`/api/trades/list?userId=${userId}&take=${take}`, {
+                        method: "GET",
+                        headers: { 
+                            'Authorization': token ? `Bearer ${token}` : '',
+                            'Content-Type': 'application/json' 
+                        },
+                        credentials: 'include',
+                        cache: "no-store",
+                    }),
+                    fetch(`/api/transfers/list?userId=${userId}`, {
+                        method: "GET",
+                        headers: { 
+                            'Authorization': token ? `Bearer ${token}` : '',
+                            'Content-Type': 'application/json' 
+                        },
+                        credentials: 'include',
+                        cache: "no-store",
+                    })
+                ]);
 
-                const res = await fetch(`/api/trades/list?userId=${userId}&take=${take}`, {
-                    method: "GET",
-                    headers: { "Content-Type": "application/json" },
-                    cache: "no-store",
-                });
+                if (!tradesRes.ok) throw new Error(await tradesRes.text());
 
-                if (!res.ok) throw new Error(await res.text());
-
-                const data: { items: ApiTrade[]; nextCursor: number | null } = await res.json();
+                const tradesData: { data?: { items: ApiTrade[]; nextCursor: number | null }; items?: ApiTrade[] } = await tradesRes.json();
                 if (!mounted) return;
 
-                const list = (data.items || []).map(transform);
-                list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                setTransactions(list);
-            } catch (e: any) {
-                setErr(e?.message ?? "데이터 로드 중 오류");
+                const tradeItems = tradesData?.data?.items ?? tradesData?.items ?? [];
+                const tradeList = tradeItems.map(transform);
+
+                // 입출금 내역 처리
+                const transferList: Transaction[] = [];
+                if (transfersRes.ok) {
+                    const transfersData = await transfersRes.json();
+                    const transferItems = transfersData?.data?.items ?? transfersData?.items ?? [];
+                    
+                    transferItems.forEach((item: {
+                        id: number;
+                        type: string;
+                        status: string;
+                        amount: number;
+                        address: string | null;
+                        requestedAt: string;
+                        asset: { symbol: string; name: string };
+                    }) => {
+                        const date = new Date(item.requestedAt);
+                        const isDeposit = item.type === 'DEPOSIT';
+                        const counterparty = item.address ? ` (${item.address})` : '';
+                        const category = isDeposit ? '입금' : '출금';
+                        
+                        transferList.push({
+                            id: `transfer-${item.id}`,
+                            date: date.toISOString(),
+                            description: `${category}${counterparty}`,
+                            amount: Number(item.amount),
+                            type: isDeposit ? 'income' : 'expense',
+                            category: category as '입금' | '출금',
+                            method: 'wallet',
+                            status: item.status === 'SUCCESS' ? 'completed' : item.status === 'PENDING' ? 'pending' : 'cancelled',
+                            coin: item.asset.symbol.toUpperCase(),
+                            coinName: item.asset.name,
+                            quantity: Number(item.amount),
+                            price: 0,
+                            total: 0,
+                            fee: 0,
+                            note: counterparty
+                        });
+                    });
+                }
+
+                // 거래 내역과 입출금 내역 합치고 정렬
+                const allTransactions = [...tradeList, ...transferList];
+                allTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                setTransactions(allTransactions);
+            } catch (e: unknown) {
+                setErr(e instanceof Error ? e.message : "데이터 로드 중 오류");
             } finally {
                 if (mounted) setLoading(false);
             }
@@ -505,7 +623,7 @@ export default function HistoryPage() {
         const arr = transactions.filter((t) => {
             const matchesSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase());
             const matchesType = filterType === "all" || t.type === filterType;
-            const matchesCat = filterCategory === "all" || t.category === (filterCategory as any);
+            const matchesCat = filterCategory === "all" || t.category === filterCategory;
             const matchesPeriod = !start || new Date(t.date) >= start;
             return matchesSearch && matchesType && matchesCat && matchesPeriod;
         });
@@ -613,7 +731,7 @@ export default function HistoryPage() {
 
                         <FancySelect
                             value={periodFilter}
-                            onChange={(v) => setPeriodFilter(v as any)}
+                            onChange={(v) => setPeriodFilter(v as typeof periodFilter)}
                             options={[
                                 { value: "1month", label: "1개월" },
                                 { value: "3months", label: "3개월" },
@@ -665,9 +783,11 @@ export default function HistoryPage() {
                                 </div>
 
                                 <div className="right">
-                                    <p className={`amt ${t.type === "income" ? "up-c" : "dn-c"}`}>
-                                        {t.type === "income" ? "+" : "-"}{fmtAmt(Math.abs(t.amount))}
-                                    </p>
+                                    {(t.category !== "입금" && t.category !== "출금") && (
+                                        <p className={`amt ${t.type === "income" ? "up-c" : "dn-c"}`}>
+                                            {t.type === "income" ? "+" : "-"}{fmtAmt(Math.abs(t.amount))}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         ))}

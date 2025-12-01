@@ -13,10 +13,12 @@ export const prisma =
     globalForPrisma.prisma ??
     new PrismaClient({
         log: logs,
-        // 필요 시 명시적 데이터소스 URL 지정
+        // Connection pool 설정 (최적화)
         datasources: process.env.DATABASE_URL
             ? { db: { url: process.env.DATABASE_URL } }
             : undefined,
+        // 추가 최적화 옵션
+        errorFormat: 'minimal',
     });
 
 // 개발 핫리로드 시 중복 생성을 방지

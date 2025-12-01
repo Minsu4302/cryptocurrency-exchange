@@ -49,6 +49,7 @@ export default async function handler(
             data: {
                 email,
                 password: hashedPassword,
+                balance: 10000000, // 초기 잔액 10000000으로 설정
             },
         })
 

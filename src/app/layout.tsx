@@ -56,7 +56,25 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
                 }
 
                 // 2) 토큰으로 서버에서 최신 정보 조회
-                const token = localStorage.getItem('token') || localStorage.getItem('TOKEN') || '';
+                const authCandidates = [
+                    localStorage.getItem('AUTH'),
+                    localStorage.getItem('auth'),
+                    localStorage.getItem('SESSION'),
+                    localStorage.getItem('session'),
+                    localStorage.getItem('USER'),
+                    localStorage.getItem('user'),
+                ]
+                let token: string | null = null
+                for (const raw of authCandidates) {
+                    if (!raw) continue
+                    try {
+                        const p = JSON.parse(raw)
+                        const possible = [p?.token, p?.accessToken, p?.access_token, p?.idToken, p?.id_token]
+                        const found = possible.find((t) => typeof t === 'string' && String(t).length > 0)
+                        if (found) { token = String(found); break }
+                    } catch {}
+                }
+
                 if (!token) {
                     setLoadingUser(false);
                     return;
@@ -73,14 +91,15 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
                 });
 
                 if (res.ok) {
-                    const data = (await res.json()) as MeResponse;
-                    if (data?.user?.email) {
+                    const data = (await res.json()) as any;
+                    const userData = data?.data?.user ?? data?.user
+                    if (userData?.email) {
                         const nextUser: UserInfo = {
-                            email: data.user.email,
-                            balance: Number(data.user.balance ?? 0),
+                            email: userData.email,
+                            balance: Number(userData.balance ?? 0),
                         };
                         setUser(nextUser);
-                        localStorage.setItem('AUTH', JSON.stringify(nextUser));
+                        localStorage.setItem('AUTH', JSON.stringify({ ...nextUser, token }));
                     } else {
                         setUser(null);
                         localStorage.removeItem('AUTH');
@@ -97,6 +116,24 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
             }
         };
         loadUser();
+
+        // Balance 업데이트 이벤트 리스너
+        const handleBalanceUpdate = (event: any) => {
+            const newBalance = event.detail?.balance
+            if (typeof newBalance === 'number') {
+                setUser(prev => prev ? { ...prev, balance: newBalance } : null)
+                // localStorage도 업데이트
+                try {
+                    const cached = localStorage.getItem('AUTH')
+                    if (cached) {
+                        const parsed = JSON.parse(cached)
+                        localStorage.setItem('AUTH', JSON.stringify({ ...parsed, balance: newBalance }))
+                    }
+                } catch {}
+            }
+        }
+        window.addEventListener('balanceUpdate', handleBalanceUpdate)
+        return () => window.removeEventListener('balanceUpdate', handleBalanceUpdate)
     }, []);
 
     // ✅ 로그아웃

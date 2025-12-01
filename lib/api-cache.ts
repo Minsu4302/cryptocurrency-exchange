@@ -100,19 +100,29 @@ export async function rateLimit(
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-export async function fetchUpstream<T = any>(url: string): Promise<T> {
-    let lastErr: unknown;
-    for (const delay of [0, 300, 700]) {
+export async function fetchUpstream<T = any>(url: string, timeoutMs = 4000): Promise<T> {
+    let lastErr: unknown
+    for (const delay of [0, 250, 600]) {
         try {
-            if (delay) await new Promise((r) => setTimeout(r, delay));
-            const res = await fetch(url, { cache: 'no-store' });
-            if (!res.ok) throw new Error(`status ${res.status}`);
-            return (await res.json()) as T;
+            if (delay) await new Promise((r) => setTimeout(r, delay))
+            const ctrl = new AbortController()
+            const to = setTimeout(() => ctrl.abort(), timeoutMs)
+            const res = await fetch(url, {
+                cache: 'no-store',
+                keepalive: true,
+                signal: ctrl.signal,
+                headers: {
+                    'Accept': 'application/json',
+                },
+            })
+            clearTimeout(to)
+            if (!res.ok) throw new Error(`status ${res.status}`)
+            return (await res.json()) as T
         } catch (e) {
-            lastErr = e;
+            lastErr = e
         }
     }
-    throw lastErr;
+    throw lastErr
 }
 
 /**
@@ -134,7 +144,8 @@ export async function serveWithCache(
 
     // FRESH
     if (cached && now * 1000 - cached.savedAt <= MS(freshSec)) {
-        res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=120');
+        res.setHeader('Cache-Control', `public, max-age=${freshSec}, stale-while-revalidate=${staleSec}`)
+        res.setHeader('Vary', 'Accept, Accept-Encoding')
         res.setHeader('X-Cache', 'FRESH');
         return res.status(200).json(cached.value);
     }
@@ -154,7 +165,8 @@ export async function serveWithCache(
                 }
             })().catch(() => {});
         }
-        res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=120');
+        res.setHeader('Cache-Control', `public, max-age=${freshSec}, stale-while-revalidate=${staleSec}`)
+        res.setHeader('Vary', 'Accept, Accept-Encoding')
         res.setHeader('X-Cache', 'STALE');
         return res.status(200).json(cached.value);
     }
@@ -164,13 +176,15 @@ export async function serveWithCache(
         const payload = await loader();
         const totalTtl = freshSec + staleSec + 60;
         await setEntry(key, payload, totalTtl);
-        res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=120');
+        res.setHeader('Cache-Control', `public, max-age=${freshSec}, stale-while-revalidate=${staleSec}`)
+        res.setHeader('Vary', 'Accept, Accept-Encoding')
         res.setHeader('X-Cache', 'MISS');
         return res.status(200).json(payload);
     } catch {
         // 완전 실패 → 캐시가 있으면 STALE-FALLBACK
         if (cached) {
-            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Cache-Control', 'no-cache')
+            res.setHeader('Vary', 'Accept, Accept-Encoding')
             res.setHeader('X-Cache', 'STALE-FALLBACK');
             return res.status(200).json(cached.value);
         }

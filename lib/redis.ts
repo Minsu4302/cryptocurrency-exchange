@@ -27,3 +27,24 @@ export function getRedis(): Redis | null {
         return null;
     }
 }
+
+/**
+ * Upstash 파이프라인으로 여러 키를 한 번에 읽어오기.
+ * 클라이언트가 없거나 오류 시에는 빈 객체 반환.
+ */
+export async function mgetStrings(keys: string[]): Promise<Record<string, string | null>> {
+    if (!client || keys.length === 0) return {}
+    try {
+        const pipe = client.pipeline()
+        keys.forEach((k) => pipe.get<string>(k))
+        const results = await pipe.exec<string>()
+        const out: Record<string, string | null> = {}
+        keys.forEach((k, i) => {
+            const v = results[i]
+            out[k] = typeof v === 'string' ? v : (v ?? null)
+        })
+        return out
+    } catch {
+        return {}
+    }
+}

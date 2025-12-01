@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import prisma from '../../../lib/prisma'
-import { getRedis } from '../../../lib/redis'
+import { getRedis, mgetStrings } from '../../../lib/redis'
 import {
     respondMethodNotAllowed,
     respondBadRequest,
@@ -33,17 +33,35 @@ export default async function handler(
         })
 
         const list: Array<{ symbol: string; name: string; amount: string }> = []
-        // Upstash는 멀티 GET 파이프라인이 없어서 단건 루프 사용
+        
+        // 1) Redis에서 잔액 확인 (있으면 사용)
         if (redis) {
-            for (const a of assets) {
-                try {
-                    const bal = await redis.get<string>(`bal:${userId}:${a.id}`)
-                    if (!bal || bal === '0' || bal === '0.000000000000000000') continue
-                    list.push({ symbol: a.symbol, name: a.name, amount: bal })
-                } catch {
-                    // Redis 오류 시 해당 항목 스킵
+            const keys = assets.map((a) => `bal:${userId}:${a.id}`)
+            const map = await mgetStrings(keys)
+            assets.forEach((a) => {
+                const bal = map[`bal:${userId}:${a.id}`]
+                if (!bal || bal === '0' || bal === '0.000000000000000000') return
+                list.push({ symbol: a.symbol, name: a.name, amount: bal })
+            })
+        }
+        
+        // 2) Redis에 데이터가 없으면 Prisma Holding 테이블에서 가져오기
+        if (list.length === 0) {
+            const holdings = await prisma.holding.findMany({
+                where: { userId },
+                select: { symbol: true, amount: true }
+            })
+            
+            holdings.forEach((h) => {
+                if (h.amount && h.amount !== '0') {
+                    const asset = assets.find(a => a.symbol === h.symbol)
+                    list.push({ 
+                        symbol: h.symbol, 
+                        name: asset?.name || h.symbol, 
+                        amount: h.amount 
+                    })
                 }
-            }
+            })
         }
 
         respondSuccess(res, { userId, holdings: list })

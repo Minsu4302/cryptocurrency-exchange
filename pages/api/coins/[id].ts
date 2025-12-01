@@ -30,10 +30,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}` +
         '?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false'
 
-    // 코인 단건은 자주 바뀌므로 fresh 10s / stale 180s 정도로 설정
+    // 코인 단건은 빈번히 재조회되므로 캐시 윈도우를 확대해 효율 개선
     return serveWithCache(res, key, async () => fetchUpstream(url), {
-        freshSec: 10,
-        staleSec: 180,
+        freshSec: 30,
+        staleSec: 600,
         lockSec: 10,
     })
 }

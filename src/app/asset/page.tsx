@@ -23,50 +23,329 @@ type Transaction = {
     time: string;
 };
 
-const mockAssets: Asset[] = [
-    { symbol: "KRW", name: "원화", balance: "207,002", percentage: "0.00%", krwValue: "207,002 KRW", icon: "W" },
-    { symbol: "BTC", name: "비트코인", balance: "0", percentage: "0.00%", krwValue: "0 KRW", icon: "₿" },
-    { symbol: "ETH", name: "이더리움", balance: "1,003.52262330", percentage: "24.58%", krwValue: "3,743,159,384 KRW", icon: "Ξ" },
-    { symbol: "SOL", name: "솔라나", balance: "50,001.43141124", percentage: "75.42%", krwValue: "11,485,328,795 KRW", icon: "S" },
-    { symbol: "1INCH", name: "1인치네트워크", balance: "0", percentage: "0.00%", krwValue: "0 KRW", icon: "1" },
-    { symbol: "USDS", name: "USDS", balance: "0", percentage: "0.00%", krwValue: "0 KRW", icon: "U" },
-    { symbol: "GAS", name: "가스", balance: "0", percentage: "0.00%", krwValue: "0 KRW", icon: "G" }
-];
+type PortfolioHolding = {
+    symbol: string;
+    name: string;
+    amount: string;
+};
 
-const mockTransactions: Transaction[] = [
-    { id: "1", type: "deposit", asset: "출금 완료", amount: "5,000 KRW", status: "completed", date: "2024.10.18", time: "19:50" },
-    { id: "2", type: "withdraw", asset: "입금 완료", amount: "6,000 KRW", status: "completed", date: "2024.10.18", time: "19:40" }
-];
+// CoinGecko 가격 캐시 (5분)
+const priceCache = new Map<string, { price: number; timestamp: number }>();
+const CACHE_DURATION = 5 * 60 * 1000; // 5분
+
+// CoinGecko symbol 매핑
+const COINGECKO_IDS: Record<string, string> = {
+    'BTC': 'bitcoin',
+    'ETH': 'ethereum',
+    'USDT': 'tether',
+    'BNB': 'binancecoin',
+    'SOL': 'solana',
+    'XRP': 'ripple',
+    'USDC': 'usd-coin',
+    'ADA': 'cardano',
+    'DOGE': 'dogecoin',
+    'TRX': 'tron',
+    'TON': 'the-open-network',
+    'LINK': 'chainlink',
+    'MATIC': 'matic-network',
+    'DOT': 'polkadot',
+    'AVAX': 'avalanche-2',
+    'SHIB': 'shiba-inu',
+    'UNI': 'uniswap',
+    'ATOM': 'cosmos',
+    'LTC': 'litecoin',
+    'BCH': 'bitcoin-cash'
+};
 
 export default function DepositWithdrawPage() {
     const { theme } = useTheme();
     const [bgColor, setBgColor] = useState<string>("");
 
+    // 사용자 정보
+    const [userId, setUserId] = useState<number | null>(null);
+    const [userBalance, setUserBalance] = useState<number>(0);
+    const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [coinPrices, setCoinPrices] = useState<Record<string, number>>({});
+
     // 검색 상태
     const [searchTerm, setSearchTerm] = useState("");
+    
+    // CoinGecko 가격 조회 함수 (캐싱 적용)
+    const fetchCoinPrices = async (symbols: string[]) => {
+        const now = Date.now();
+        const symbolsToFetch: string[] = [];
+        const cachedPrices: Record<string, number> = {};
+
+        // 캐시 확인
+        symbols.forEach(symbol => {
+            const cached = priceCache.get(symbol);
+            if (cached && now - cached.timestamp < CACHE_DURATION) {
+                cachedPrices[symbol] = cached.price;
+            } else {
+                symbolsToFetch.push(symbol);
+            }
+        });
+
+        // 새로 가져올 것이 있으면 API 호출
+        if (symbolsToFetch.length > 0) {
+            try {
+                const ids = symbolsToFetch
+                    .map(s => COINGECKO_IDS[s.toUpperCase()])
+                    .filter(Boolean)
+                    .join(',');
+                
+                if (ids) {
+                    const res = await fetch(
+                        `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=krw`,
+                        { next: { revalidate: 300 } } // 5분 캐싱
+                    );
+                    
+                    if (res.ok) {
+                        const data = await res.json();
+                        
+                        symbolsToFetch.forEach(symbol => {
+                            const coinId = COINGECKO_IDS[symbol.toUpperCase()];
+                            if (coinId && data[coinId]?.krw) {
+                                const price = data[coinId].krw;
+                                cachedPrices[symbol] = price;
+                                priceCache.set(symbol, { price, timestamp: now });
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('CoinGecko API error:', error);
+            }
+        }
+
+        return cachedPrices;
+    };
+    
+    // Assets 변환 (가격 정보 포함)
+    const assets: Asset[] = useMemo(() => {
+        const result: Asset[] = [
+            {
+                symbol: "KRW",
+                name: "원화",
+                balance: userBalance.toLocaleString(),
+                percentage: "0.00%",
+                krwValue: `${userBalance.toLocaleString()} KRW`,
+                icon: "₩"
+            }
+        ];
+
+        // 코인 자산들의 총 개수 계산 (비율 계산용)
+        let totalCoinAmount = 0;
+        const coinAssets: (Asset & { _amount?: number })[] = [];
+
+        holdings.forEach(h => {
+            const amount = parseFloat(h.amount) || 0;
+            const price = coinPrices[h.symbol.toUpperCase()] || 0;
+            const krwValue = amount * price;
+            totalCoinAmount += amount;
+
+            coinAssets.push({
+                symbol: h.symbol,
+                name: h.name || h.symbol,
+                balance: amount.toLocaleString(undefined, { 
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 8 
+                }),
+                percentage: "0.00%",
+                krwValue: price > 0 ? `${Math.round(krwValue).toLocaleString()} KRW` : "가격 정보 없음",
+                icon: h.symbol[0] || "?",
+                _amount: amount
+            });
+        });
+
+        // 비율 계산 (각 코인의 개수 기준)
+        if (totalCoinAmount > 0) {
+            coinAssets.forEach(asset => {
+                const percentage = ((asset._amount || 0) / totalCoinAmount) * 100;
+                asset.percentage = `${percentage.toFixed(2)}%`;
+            });
+        }
+
+        result.push(...coinAssets);
+        return result;
+    }, [userBalance, holdings, coinPrices]);
+
     const filteredAssets = useMemo(() => {
         const q = searchTerm.trim().toLowerCase();
-        if (!q) return mockAssets;
-        return mockAssets.filter(
+        if (!q) return assets;
+        return assets.filter(
             (a) => a.name.toLowerCase().includes(q) || a.symbol.toLowerCase().includes(q)
         );
-    }, [searchTerm]);
+    }, [searchTerm, assets]);
+
+    // 총 평가 (KRW + 코인 자산)
+    const totalKRWValue = useMemo(() => {
+        let total = userBalance;
+        holdings.forEach(h => {
+            const amount = parseFloat(h.amount) || 0;
+            const price = coinPrices[h.symbol.toUpperCase()] || 0;
+            total += amount * price;
+        });
+        return total;
+    }, [userBalance, holdings, coinPrices]);
+
+    const totalBTCValue = 0; // BTC 환산은 별도 계산 필요
 
     // 탭
-    const [activeTab, setActiveTab] = useState<"history" | "deposit" | "withdraw">("history");
+    const [activeTab, setActiveTab] = useState<"history" | "send" | "receive">("history");
 
-    // 입금 상태
-    const [depositAsset, setDepositAsset] = useState<string>("");
-    const [depositAddress, setDepositAddress] = useState<string>("");
+    // 전송 상태
+    const [sendAsset, setSendAsset] = useState<string>("");
+    const [receiverEmail, setReceiverEmail] = useState<string>("");
+    const [sendAmount, setSendAmount] = useState<string>("");
+    const [sendMemo, setSendMemo] = useState<string>("");
+    const [sendLoading, setSendLoading] = useState(false);
 
-    // 출금 상태
-    const [withdrawAsset, setWithdrawAsset] = useState<string>("");
-    const [withdrawAddress, setWithdrawAddress] = useState<string>("");
-    const [withdrawAmount, setWithdrawAmount] = useState<string>("");
+    // 수신 정보 (로그인한 사용자의 이메일)
+    const [userEmail, setUserEmail] = useState<string>("");
 
-    // 총 평가
-    const totalKRWValue = 15_228_675_182;
-    const totalBTCValue = 162.42326904;
+    // 거래 내역
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+
+    // 사용자 정보 가져오기
+    useEffect(() => {
+        async function fetchUserData() {
+            try {
+                // layout.tsx와 동일한 방식으로 토큰 찾기
+                const authCandidates = [
+                    localStorage.getItem('AUTH'),
+                    localStorage.getItem('auth'),
+                    localStorage.getItem('SESSION'),
+                    localStorage.getItem('session'),
+                    localStorage.getItem('USER'),
+                    localStorage.getItem('user'),
+                ];
+                
+                let token: string | null = null;
+                for (const raw of authCandidates) {
+                    if (!raw) continue;
+                    try {
+                        const p = JSON.parse(raw);
+                        const possible = [p?.token, p?.accessToken, p?.access_token, p?.idToken, p?.id_token];
+                        const found = possible.find((t) => typeof t === 'string' && String(t).length > 0);
+                        if (found) { 
+                            token = String(found); 
+                            break;
+                        }
+                    } catch {}
+                }
+                
+                console.log('Token found:', !!token);
+                if (!token) {
+                    // 토큰이 없으면 조용히 로딩 종료 (로그인 안 한 상태)
+                    setLoading(false);
+                    return;
+                }
+
+                // 사용자 정보 가져오기
+                console.log('Fetching /api/me...');
+                const meRes = await fetch('/api/me', {
+                    headers: { Authorization: `Bearer ${token}` },
+                    credentials: 'include'
+                });
+
+                console.log('/api/me status:', meRes.status, meRes.ok);
+                if (!meRes.ok) {
+                    console.log('/api/me failed');
+                    setLoading(false);
+                    return;
+                }
+
+                const meData = await meRes.json();
+                console.log('Full /api/me response:', meData);
+                
+                // data.user 또는 user 경로 모두 확인
+                const userData = meData?.data?.user ?? meData?.user;
+                const uid = userData?.id;
+                const balance = userData?.balance || 0;
+                const email = userData?.email || '';
+                console.log('Extracted userId:', uid, 'balance:', balance, 'email:', email);
+
+                if (!uid) {
+                    console.log('No userId found');
+                    setLoading(false);
+                    return;
+                }
+
+                setUserId(uid);
+                setUserBalance(Number(balance));
+                setUserEmail(email);
+
+                // 포트폴리오와 Transfer 내역 병렬 처리
+                const [portfolioRes, transfersRes] = await Promise.all([
+                    fetch(`/api/portfolio?userId=${uid}`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        credentials: 'include'
+                    }),
+                    fetch(`/api/transfers/list?userId=${uid}`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        credentials: 'include'
+                    })
+                ]);
+
+                // 포트폴리오 처리
+                if (portfolioRes.ok) {
+                    const portfolioData = await portfolioRes.json();
+                    const holdingsData = portfolioData.data?.holdings ?? portfolioData.holdings ?? [];
+                    setHoldings(holdingsData);
+                    
+                    // 코인 가격 조회 (백그라운드에서 비동기 처리)
+                    if (holdingsData.length > 0) {
+                        const symbols = holdingsData.map((h: PortfolioHolding) => h.symbol.toUpperCase());
+                        fetchCoinPrices(symbols).then(prices => {
+                            setCoinPrices(prices);
+                        }).catch(err => {
+                            console.error('Failed to fetch coin prices:', err);
+                        });
+                    }
+                }
+
+                // Transfer 내역 처리
+                if (transfersRes.ok) {
+                    const transfersData = await transfersRes.json();
+                    const items = transfersData.data?.items ?? transfersData.items ?? [];
+                    
+                    // Transfer를 Transaction 형식으로 변환
+                    const formattedTransactions: Transaction[] = items.map((item: {
+                        id: number;
+                        type: string;
+                        amount: number;
+                        status: string;
+                        requestedAt: string;
+                        address: string | null;
+                        asset: { symbol: string; name: string };
+                    }) => {
+                        const date = new Date(item.requestedAt);
+                        const counterparty = item.address ? ` (${item.address})` : '';
+                        return {
+                            id: String(item.id),
+                            type: item.type === 'DEPOSIT' ? 'deposit' : 'withdraw',
+                            asset: `${item.type === 'DEPOSIT' ? '입금' : '출금'} ${item.asset.symbol}${counterparty}`,
+                            amount: `${Number(item.amount).toLocaleString()} ${item.asset.symbol}`,
+                            status: item.status === 'SUCCESS' ? 'completed' : item.status === 'PENDING' ? 'pending' : 'failed',
+                            date: date.toLocaleDateString('ko-KR'),
+                            time: date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                        };
+                    });
+                    
+                    setTransactions(formattedTransactions);
+                }
+
+                setLoading(false);
+            } catch (error) {
+                console.error('Error fetching user data:', error);
+                setLoading(false);
+            }
+        }
+
+        fetchUserData();
+    }, []);
 
     useEffect(() => {
         const isDark = theme !== "light-theme";
@@ -77,35 +356,15 @@ export default function DepositWithdrawPage() {
         setBgColor(backgroundColor || "var(--background-color)");
     }, [theme]);
 
-    function generateDepositAddress() {
-        const map: Record<string, string> = {
-            BTC: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
-            ETH: "0x742d35Cc6639C0532F0a2A2e9A5b3b5c9f6E8f1A",
-            KRW: "110-000-000000",
-            SOL: "sol1234567890abcdef1234567890abcdef123456"
-        };
-        if (depositAsset && map[depositAsset]) setDepositAddress(map[depositAsset]);
-    }
-
-    function copy(text: string) {
-        navigator.clipboard.writeText(text);
-    }
-
-    function getAvailableBalance(sym: string) {
-        const a = mockAssets.find((x) => x.symbol === sym);
-        return a ? a.balance : "0";
-    }
-
-    function setMaxWithdraw() {
-        setWithdrawAmount(getAvailableBalance(withdrawAsset).replace(/,/g, ""));
-    }
-
-    const parsedAmount = Number.isFinite(parseFloat(withdrawAmount)) ? parseFloat(withdrawAmount) : 0;
-    const fee = withdrawAsset ? 0.0005 : 0;
-    const net = Math.max(parsedAmount - fee, 0);
-
     return (
         <main className="page" style={{ backgroundColor: bgColor }}>
+            {loading ? (
+                <div className="container">
+                    <div className="center" style={{ padding: '40px' }}>
+                        <div>로딩 중...</div>
+                    </div>
+                </div>
+            ) : (
             <div className="container">
                 <section className="grid">
                     {/* 왼쪽: 총 보유자산 */}
@@ -171,19 +430,19 @@ export default function DepositWithdrawPage() {
                                 <div className="stack">
                                     <div>
                                         <div className="muted small">총 보유</div>
-                                        <div className="strong">207,002 KRW</div>
+                                        <div className="strong">{userBalance.toLocaleString()} KRW</div>
                                     </div>
                                     <div>
                                         <div className="muted small">거래가능 수량</div>
-                                        <div>0 KRW</div>
+                                        <div>{userBalance.toLocaleString()} KRW</div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        {/* 입출금 탭 */}
+                        {/* 전송/수신 탭 */}
                         <div className="card" role="region" aria-labelledby="tab-title">
-                            <header className="tabs" id="tab-title" role="tablist" aria-label="입출금">
+                            <header className="tabs" id="tab-title" role="tablist" aria-label="자산 전송">
                                 <button
                                     className={`tab ${activeTab === "history" ? "active" : ""}`}
                                     role="tab"
@@ -194,22 +453,22 @@ export default function DepositWithdrawPage() {
                                     내역
                                 </button>
                                 <button
-                                    className={`tab ${activeTab === "deposit" ? "active" : ""}`}
+                                    className={`tab ${activeTab === "send" ? "active" : ""}`}
                                     role="tab"
-                                    aria-selected={activeTab === "deposit"}
-                                    onClick={() => setActiveTab("deposit")}
+                                    aria-selected={activeTab === "send"}
+                                    onClick={() => setActiveTab("send")}
                                     type="button"
                                 >
-                                    입금
+                                    전송
                                 </button>
                                 <button
-                                    className={`tab ${activeTab === "withdraw" ? "active" : ""}`}
+                                    className={`tab ${activeTab === "receive" ? "active" : ""}`}
                                     role="tab"
-                                    aria-selected={activeTab === "withdraw"}
-                                    onClick={() => setActiveTab("withdraw")}
+                                    aria-selected={activeTab === "receive"}
+                                    onClick={() => setActiveTab("receive")}
                                     type="button"
                                 >
-                                    출금
+                                    수신
                                 </button>
                             </header>
 
@@ -225,202 +484,320 @@ export default function DepositWithdrawPage() {
                                             </select>
                                         </div>
 
-                                        <ul className="historyList" role="list">
-                                            {mockTransactions.map((tx) => (
-                                                <li key={tx.id} className="historyItem">
-                                                    <div className="rowBetween">
-                                                        <div className="muted small">{tx.date}</div>
-                                                    </div>
-                                                    <div className="rowBetween">
-                                                        <div>
-                                                            <div className="strong small">{tx.asset}</div>
-                                                            <div className="muted xsmall">{tx.time}</div>
+                                        {transactions.length === 0 ? (
+                                            <div className="muted center small padY" style={{ padding: '40px 20px' }}>
+                                                전송 내역이 없습니다.
+                                            </div>
+                                        ) : (
+                                            <ul className="historyList" role="list">
+                                                {transactions.map((tx) => (
+                                                    <li key={tx.id} className="historyItem">
+                                                        <div className="rowBetween">
+                                                            <div className="muted small">{tx.date}</div>
                                                         </div>
-                                                        <div className="textRight strong">{tx.amount}</div>
-                                                    </div>
-                                                </li>
-                                            ))}
-                                        </ul>
+                                                        <div className="rowBetween">
+                                                            <div>
+                                                                <div className="strong small">{tx.asset}</div>
+                                                                <div className="muted xsmall">{tx.time}</div>
+                                                            </div>
+                                                            <div className="textRight strong">{tx.amount}</div>
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
 
                                         <div className="muted center small padY">
-                                            최근 입출금 내역이 거래내역에 확인하실 수 있습니다.
+                                            최근 전송 내역은 거래내역 페이지에서 확인하실 수 있습니다.
                                         </div>
                                     </div>
                                 )}
 
-                                {/* 탭: 입금 */}
-                                {activeTab === "deposit" && (
-                                    <form className="form" noValidate>
+                                {/* 탭: 전송 */}
+                                {activeTab === "send" && (
+                                    <form className="form" noValidate onSubmit={async (e) => {
+                                        e.preventDefault();
+                                        if (sendLoading) return;
+
+                                        try {
+                                            setSendLoading(true);
+
+                                            const authCandidates = [
+                                                localStorage.getItem('AUTH'),
+                                                localStorage.getItem('auth'),
+                                            ];
+                                            
+                                            let token: string | null = null;
+                                            for (const raw of authCandidates) {
+                                                if (!raw) continue;
+                                                try {
+                                                    const p = JSON.parse(raw);
+                                                    const possible = [p?.token, p?.accessToken];
+                                                    const found = possible.find((t) => typeof t === 'string' && String(t).length > 0);
+                                                    if (found) { 
+                                                        token = String(found); 
+                                                        break;
+                                                    }
+                                                } catch {}
+                                            }
+
+                                            if (!token) {
+                                                alert('로그인이 필요합니다');
+                                                return;
+                                            }
+
+                                            const res = await fetch('/api/transfers/send', {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'Authorization': `Bearer ${token}`
+                                                },
+                                                credentials: 'include',
+                                                body: JSON.stringify({
+                                                    receiverEmail,
+                                                    symbol: sendAsset,
+                                                    amount: sendAmount,
+                                                    memo: sendMemo || undefined
+                                                })
+                                            });
+
+                                            const data = await res.json();
+
+                                            if (res.ok) {
+                                                alert(`전송 완료! ${sendAmount} ${sendAsset}을(를) ${receiverEmail}에게 전송했습니다.`);
+                                                setSendAsset('');
+                                                setReceiverEmail('');
+                                                setSendAmount('');
+                                                setSendMemo('');
+                                                
+                                                // 잔액과 holdings 업데이트 (새로고침 대신)
+                                                if (token) {
+                                                    const [meRes, portfolioRes, transfersRes] = await Promise.all([
+                                                        fetch('/api/me', {
+                                                            headers: { Authorization: `Bearer ${token}` },
+                                                            credentials: 'include'
+                                                        }),
+                                                        fetch(`/api/portfolio?userId=${userId}`, {
+                                                            headers: { Authorization: `Bearer ${token}` },
+                                                            credentials: 'include'
+                                                        }),
+                                                        fetch(`/api/transfers/list?userId=${userId}`, {
+                                                            headers: { Authorization: `Bearer ${token}` },
+                                                            credentials: 'include'
+                                                        })
+                                                    ]);
+                                                    
+                                                    if (meRes.ok) {
+                                                        const meData = await meRes.json();
+                                                        const userData = meData?.data?.user ?? meData?.user;
+                                                        setUserBalance(Number(userData?.balance || 0));
+                                                    }
+                                                    
+                                                    if (portfolioRes.ok) {
+                                                        const portfolioData = await portfolioRes.json();
+                                                        const holdingsData = portfolioData.data?.holdings ?? portfolioData.holdings ?? [];
+                                                        setHoldings(holdingsData);
+                                                        
+                                                        // 가격 정보 유지 (캐시 사용)
+                                                        if (holdingsData.length > 0) {
+                                                            const symbols = holdingsData.map((h: PortfolioHolding) => h.symbol.toUpperCase());
+                                                            fetchCoinPrices(symbols).then(prices => {
+                                                                setCoinPrices(prices);
+                                                            }).catch(err => {
+                                                                console.error('Failed to refresh coin prices:', err);
+                                                            });
+                                                        }
+                                                    }
+                                                    
+                                                    if (transfersRes.ok) {
+                                                        const transfersData = await transfersRes.json();
+                                                        const items = transfersData.data?.items ?? transfersData.items ?? [];
+                                                        const formattedTransactions: Transaction[] = items.map((item: {
+                                                            id: number;
+                                                            type: string;
+                                                            amount: number;
+                                                            status: string;
+                                                            requestedAt: string;
+                                                            address: string | null;
+                                                            asset: { symbol: string; name: string };
+                                                        }) => {
+                                                            const date = new Date(item.requestedAt);
+                                                            const counterparty = item.address ? ` (${item.address})` : '';
+                                                            return {
+                                                                id: String(item.id),
+                                                                type: item.type === 'DEPOSIT' ? 'deposit' : 'withdraw',
+                                                                asset: `${item.type === 'DEPOSIT' ? '입금' : '출금'} ${item.asset.symbol}${counterparty}`,
+                                                                amount: `${Number(item.amount).toLocaleString()} ${item.asset.symbol}`,
+                                                                status: item.status === 'SUCCESS' ? 'completed' : item.status === 'PENDING' ? 'pending' : 'failed',
+                                                                date: date.toLocaleDateString('ko-KR'),
+                                                                time: date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                                                            };
+                                                        });
+                                                        setTransactions(formattedTransactions);
+                                                    }
+                                                    
+                                                    // balanceUpdate 이벤트 발생 (layout 업데이트용)
+                                                    window.dispatchEvent(new CustomEvent('balanceUpdate'));
+                                                }
+                                            } else {
+                                                alert(data.message || '전송 실패');
+                                            }
+                                        } catch (error) {
+                                            console.error('Send error:', error);
+                                            alert('전송 중 오류가 발생했습니다');
+                                        } finally {
+                                            setSendLoading(false);
+                                        }
+                                    }}>
                                         <label className="label">
-                                            입금할 자산 선택
+                                            전송할 자산 선택
                                             <select
                                                 className="select"
-                                                value={depositAsset}
-                                                onChange={(e) => {
-                                                    setDepositAsset(e.target.value);
-                                                    setDepositAddress("");
-                                                }}
-                                                aria-label="입금 자산 선택"
+                                                value={sendAsset}
+                                                onChange={(e) => setSendAsset(e.target.value)}
+                                                aria-label="전송 자산 선택"
+                                                required
                                             >
                                                 <option value="" disabled>
                                                     자산을 선택하세요
                                                 </option>
-                                                {mockAssets.slice(0, 4).map((a) => (
+                                                {assets.filter(a => a.symbol !== 'KRW').map((a) => (
                                                     <option key={a.symbol} value={a.symbol}>
-                                                        {a.symbol} - {a.name}
+                                                        {a.symbol} - {a.name} (잔고: {a.balance})
                                                     </option>
                                                 ))}
                                             </select>
                                         </label>
 
-                                        {depositAsset && (
-                                            <>
-                                                <button
-                                                    className="btn primary"
-                                                    type="button"
-                                                    onClick={generateDepositAddress}
-                                                >
-                                                    입금 주소 생성
-                                                </button>
+                                        <label className="label">
+                                            수신자 이메일
+                                            <input
+                                                className="input"
+                                                type="email"
+                                                value={receiverEmail}
+                                                onChange={(e) => setReceiverEmail(e.target.value)}
+                                                placeholder="receiver@example.com"
+                                                autoComplete="off"
+                                                required
+                                            />
+                                        </label>
 
-                                                {depositAddress && (
-                                                    <div className="stack">
-                                                        <label className="label">
-                                                            입금 주소
-                                                            <div className="row gap">
-                                                                <input
-                                                                    className="input"
-                                                                    readOnly
-                                                                    value={depositAddress}
-                                                                    aria-readonly
-                                                                />
-                                                                <button
-                                                                    className="btn"
-                                                                    type="button"
-                                                                    onClick={() => copy(depositAddress)}
-                                                                    aria-label="주소 복사"
-                                                                >
-                                                                    복사
-                                                                </button>
-                                                            </div>
-                                                        </label>
-
-                                                        <div className="note">
-                                                            <div className="noteRow">
-                                                                <strong className="small">주의사항</strong>
-                                                            </div>
-                                                            <ul className="noteList">
-                                                                <li>• 오직 {depositAsset} 네트워크로만 입금하세요</li>
-                                                                <li>• 최소 입금 금액을 확인하세요</li>
-                                                                <li>• 잘못된 주소로 전송 시 자산을 잃을 수 있습니다</li>
-                                                            </ul>
-                                                        </div>
-                                                    </div>
+                                        <label className="label">
+                                            <div className="rowBetween">
+                                                <span>전송 수량</span>
+                                                {sendAsset && (
+                                                    <span className="muted small">
+                                                        사용 가능: {assets.find(a => a.symbol === sendAsset)?.balance || '0'} {sendAsset}
+                                                    </span>
                                                 )}
-                                            </>
-                                        )}
+                                            </div>
+                                            <div className="row gap">
+                                                <input
+                                                    className="input"
+                                                    type="number"
+                                                    value={sendAmount}
+                                                    onChange={(e) => setSendAmount(e.target.value)}
+                                                    placeholder="0.00"
+                                                    step="any"
+                                                    min="0"
+                                                    required
+                                                />
+                                                <button 
+                                                    className="btn" 
+                                                    type="button" 
+                                                    onClick={() => {
+                                                        const balance = assets.find(a => a.symbol === sendAsset)?.balance || '0';
+                                                        const balanceStr = typeof balance === 'string' ? balance : String(balance);
+                                                        setSendAmount(balanceStr.replace(/,/g, ''));
+                                                    }}
+                                                    disabled={!sendAsset}
+                                                >
+                                                    최대
+                                                </button>
+                                            </div>
+                                        </label>
+
+                                        <label className="label">
+                                            메모 (선택)
+                                            <input
+                                                className="input"
+                                                type="text"
+                                                value={sendMemo}
+                                                onChange={(e) => setSendMemo(e.target.value)}
+                                                placeholder="전송 메모"
+                                                maxLength={100}
+                                            />
+                                        </label>
+
+                                        <div className="note">
+                                            <div className="noteRow">
+                                                <strong className="small">주의사항</strong>
+                                            </div>
+                                            <ul className="noteList">
+                                                <li>• 수신자 이메일을 정확히 입력하세요</li>
+                                                <li>• 전송 후 취소할 수 없습니다</li>
+                                                <li>• 전송 수수료는 없습니다</li>
+                                            </ul>
+                                        </div>
+
+                                        <button
+                                            className="btn primary full"
+                                            type="submit"
+                                            disabled={!sendAsset || !receiverEmail || !sendAmount || sendLoading}
+                                        >
+                                            {sendLoading ? '전송 중...' : '전송하기'}
+                                        </button>
                                     </form>
                                 )}
 
-                                {/* 탭: 출금 */}
-                                {activeTab === "withdraw" && (
-                                    <form className="form" noValidate>
-                                        <label className="label">
-                                            출금할 자산 선택
-                                            <select
-                                                className="select"
-                                                value={withdrawAsset}
-                                                onChange={(e) => {
-                                                    setWithdrawAsset(e.target.value);
-                                                    setWithdrawAddress("");
-                                                    setWithdrawAmount("");
-                                                }}
-                                                aria-label="출금 자산 선택"
-                                            >
-                                                <option value="" disabled>
-                                                    자산을 선택하세요
-                                                </option>
-                                                {mockAssets.slice(0, 4).map((a) => (
-                                                    <option key={a.symbol} value={a.symbol}>
-                                                        {a.symbol} - {a.name}（잔고: {a.balance}）
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
-
-                                        {withdrawAsset && (
-                                            <>
-                                                <label className="label">
-                                                    출금 주소
+                                {/* 탭: 수신 */}
+                                {activeTab === "receive" && (
+                                    <div className="form">
+                                        <div className="note">
+                                            <div className="noteRow">
+                                                <strong className="small">내 이메일 주소</strong>
+                                            </div>
+                                            <div className="stack">
+                                                <div className="row gap">
                                                     <input
                                                         className="input"
-                                                        value={withdrawAddress}
-                                                        onChange={(e) => setWithdrawAddress(e.target.value)}
-                                                        placeholder="출금할 주소를 입력하세요"
-                                                        autoComplete="off"
+                                                        readOnly
+                                                        value={userEmail}
+                                                        aria-readonly
                                                     />
-                                                </label>
-
-                                                <label className="label">
-                                                    <div className="rowBetween">
-                                                        <span>출금 수량</span>
-                                                        <span className="muted small">
-                                                            사용 가능: {getAvailableBalance(withdrawAsset)} {withdrawAsset}
-                                                        </span>
-                                                    </div>
-                                                    <div className="row gap">
-                                                        <input
-                                                            className="input"
-                                                            value={withdrawAmount}
-                                                            onChange={(e) => setWithdrawAmount(e.target.value)}
-                                                            placeholder="0.00"
-                                                            inputMode="decimal"
-                                                            aria-label="출금 수량"
-                                                        />
-                                                        <button className="btn" type="button" onClick={setMaxWithdraw}>
-                                                            최대
-                                                        </button>
-                                                    </div>
-                                                </label>
-
-                                                <div className="note">
-                                                    <div className="rowBetween small">
-                                                        <span className="muted">출금 수수료:</span>
-                                                        <span>{fee.toFixed(4)} {withdrawAsset}</span>
-                                                    </div>
-                                                    <div className="rowBetween small">
-                                                        <span className="muted">실제 출금 금액:</span>
-                                                        <span>{net.toFixed(8)} {withdrawAsset}</span>
-                                                    </div>
+                                                    <button
+                                                        className="btn"
+                                                        type="button"
+                                                        onClick={() => {
+                                                            navigator.clipboard.writeText(userEmail);
+                                                            alert('이메일 주소가 복사되었습니다');
+                                                        }}
+                                                        aria-label="이메일 복사"
+                                                    >
+                                                        복사
+                                                    </button>
                                                 </div>
+                                            </div>
+                                        </div>
 
-                                                <button
-                                                    className="btn primary full"
-                                                    type="button"
-                                                    disabled={
-                                                        !withdrawAsset ||
-                                                        !withdrawAddress.trim() ||
-                                                        !withdrawAmount ||
-                                                        parsedAmount <= 0
-                                                    }
-                                                    aria-disabled={
-                                                        !withdrawAsset ||
-                                                        !withdrawAddress.trim() ||
-                                                        !withdrawAmount ||
-                                                        parsedAmount <= 0
-                                                    }
-                                                >
-                                                    출금 요청
-                                                </button>
-                                            </>
-                                        )}
-                                    </form>
+                                        <div className="note">
+                                            <div className="noteRow">
+                                                <strong className="small">자산 수신 방법</strong>
+                                            </div>
+                                            <ul className="noteList">
+                                                <li>• 위의 이메일 주소를 전송자에게 알려주세요</li>
+                                                <li>• 전송자가 자산을 보내면 자동으로 내 계정에 입금됩니다</li>
+                                                <li>• 수신 내역은 &quot;내역&quot; 탭에서 확인할 수 있습니다</li>
+                                            </ul>
+                                        </div>
+                                    </div>
                                 )}
                             </div>
                         </div>
                     </div>
                 </section>
             </div>
+            )}
 
             <style jsx>{`
                 .page {

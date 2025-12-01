@@ -812,6 +812,13 @@ footer .social-icons a i,
     margin: 1px 30px;
 }
 
+.coin-container .right-section .status .container .item .buy.active,
+.coin-container .right-section .status .container .item .sell.active {
+    background: var(--background-color-secondary);
+    color: var(--color-white);
+    font-weight: 600;
+}
+
 .coin-container .right-section .status .container .item .orderType {
     padding: 1px 7px;
     border-radius: 12px;
@@ -822,6 +829,12 @@ footer .social-icons a i,
     transition: all 0.3s ease;
 }
 
+.coin-container .right-section .status .container .item .orderType.active {
+    background: var(--background-color-secondary);
+    color: var(--color-white);
+    font-weight: 600;
+}
+
 .coin-container .right-section .status .container .item .sell:hover,
 .coin-container .right-section .status .container .item .sell:active,
 .coin-container .right-section .status .container .item .buy:hover,
@@ -830,6 +843,50 @@ footer .social-icons a i,
 .coin-container .right-section .status .container .item .orderType:active {
     background: var(--background-color-secondary);
     color: var(--color-white);
+}
+
+/* Trading input + arrows styling for exact UI parity */
+.coin-container .right-section .status .container .item .trade-input{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 58%;
+}
+
+.coin-container .right-section .status .container .item .trade-input input.orderPrice,
+.coin-container .right-section .status .container .item .trade-input input.orderNum{
+    background: transparent;
+    color: var(--color-white);
+    font-weight: 600;
+    font-size: 14px;
+    text-align: right;
+    width: 100%;
+}
+
+.coin-container .right-section .status .container .item .trade-input input.orderPrice::placeholder,
+.coin-container .right-section .status .container .item .trade-input input.orderNum::placeholder{
+    color: var(--text-secondary);
+}
+
+.coin-container .right-section .status .container .item .trade-input .side-actions{
+    display: inline-flex;
+    gap: 6px;
+}
+
+.coin-container .right-section .status .container .item .trade-input .side-actions button{
+    padding: 2px 8px;
+    border-radius: 8px;
+    background: var(--background-color-secondary);
+    color: var(--color-white);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.coin-container .right-section .status .container .item .trade-input .side-actions button:hover,
+.coin-container .right-section .status .container .item .trade-input .side-actions button:active{
+    background: var(--links-color);
 }
 
 .coin-container .main-section{

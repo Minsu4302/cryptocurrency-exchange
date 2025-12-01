@@ -49,7 +49,9 @@ export default async function handler(
             process.env.JWT_SECRET!,
             { expiresIn: '1h' }
         )
-
+        // 쿠키에 토큰 저장 (HttpOnly)
+        const isProd = process.env.NODE_ENV === 'production'
+        res.setHeader('Set-Cookie', `token=${token}; Path=/; HttpOnly; SameSite=Lax; ${isProd ? 'Secure; ' : ''}Max-Age=3600`)
         respondSuccess(res, { token, email: user.email, balance: Number(user.balance ?? 0) })
     } catch (error) {
         console.error('로그인 오류:', error)

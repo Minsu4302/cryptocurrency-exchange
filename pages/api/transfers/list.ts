@@ -28,8 +28,21 @@ export default async function handler(
         const items = await prisma.transfer.findMany({
             where: { userId },
             orderBy: { requestedAt: 'desc' },
-            include: { asset: { select: { symbol: true, name: true } } },
-            take: 100,
+            select: {
+                id: true,
+                type: true,
+                status: true,
+                amount: true,
+                address: true,
+                requestedAt: true,
+                asset: {
+                    select: {
+                        symbol: true,
+                        name: true
+                    }
+                }
+            },
+            take: 50,
         })
         respondSuccess(res, { items })
     } catch (error) {

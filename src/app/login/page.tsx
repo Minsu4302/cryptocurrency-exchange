@@ -47,9 +47,14 @@ export default function LoginPage() {
                 throw new Error(data?.message || data?.error || '로그인 실패')
             }
 
-            // 2) 헤더 즉시 반영을 위해 로컬 저장
+            // 2) 헤더 즉시 반영을 위해 로컬 저장 (토큰 포함)
             const balanceFromLogin = typeof data?.data?.balance === 'number' ? data.data.balance : 0
-            localStorage.setItem('AUTH', JSON.stringify({ email, balance: balanceFromLogin }))
+            const tokenFromLogin = data?.data?.token || data?.token
+            localStorage.setItem('AUTH', JSON.stringify({ 
+                email, 
+                balance: balanceFromLogin,
+                token: tokenFromLogin 
+            }))
 
             // 3) 세션 쿠키 확인용 /api/me 호출(선택)
             try {
@@ -71,6 +76,7 @@ export default function LoginPage() {
                             JSON.stringify({
                                 email: u.email,
                                 balance: typeof u.balance === 'number' ? u.balance : balanceFromLogin,
+                                token: tokenFromLogin,
                             })
                         )
                     }

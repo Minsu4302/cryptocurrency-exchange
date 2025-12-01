@@ -22,13 +22,28 @@ export default async function handler(
     }
 
     const authHeader = req.headers.authorization
+    const cookieTokenCandidates = [
+        req.cookies?.token,
+        req.cookies?.accessToken,
+        req.cookies?.access_token,
+        req.cookies?.idToken,
+        req.cookies?.id_token,
+        // 세션 객체 내부에 저장되는 경우를 대비해 일반적인 키도 탐색
+        req.cookies?.SESSION,
+        req.cookies?.session,
+    ].filter((t): t is string => typeof t === 'string' && t.length > 0)
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    let token: string | undefined
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.split(' ')[1]
+    } else if (cookieTokenCandidates.length > 0) {
+        token = cookieTokenCandidates[0]
+    }
+
+    if (!token) {
         respondUnauthorized(res, '토큰이 없습니다')
         return
     }
-
-    const token = authHeader.split(' ')[1]
 
     try {
         const decoded = verifyToken(token)
