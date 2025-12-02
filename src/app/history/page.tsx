@@ -429,7 +429,7 @@ const transform = (t: ApiTrade): Transaction => {
     const isBuy = t.side === "BUY";
     const category: Transaction["category"] = isBuy ? "매수" : "매도";
     const d = new Date(t.executedAt);
-    const date = d.toISOString().split("T")[0];
+    const date = d.toISOString(); // 날짜 + 시간 모두 저장 (정렬을 위해)
     const orderTime = d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
     return {
@@ -457,7 +457,7 @@ export default function HistoryPage() {
     const [filterCategory, setFilterCategory] = useState("all");
     const [periodFilter, setPeriodFilter] = useState<"1month" | "3months" | "1year" | "all">("1month");
     const [sortBy] = useState<"date" | "amount">("date");
-    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc"); // 최신순 (내림차순)
     const [currentPage, setCurrentPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState<string | null>(null);

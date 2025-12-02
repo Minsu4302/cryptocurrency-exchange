@@ -32,9 +32,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const key = `dash:assets:${vs}:${order}:${per_page}:${page}:${sparkline}`
 
+    // 자산 목록도 자주 변하지 않음 - 캐시 시간 증가
     return serveWithCache(res, key, async () => fetchUpstream(url), {
-        freshSec: 30,
-        staleSec: 300,
+        freshSec: 120,  // 2분
+        staleSec: 600,  // 10분
         lockSec: 10,
     })
 }

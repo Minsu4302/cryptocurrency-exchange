@@ -100,29 +100,27 @@ export async function rateLimit(
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-export async function fetchUpstream<T = any>(url: string, timeoutMs = 4000): Promise<T> {
-    let lastErr: unknown
-    for (const delay of [0, 250, 600]) {
-        try {
-            if (delay) await new Promise((r) => setTimeout(r, delay))
-            const ctrl = new AbortController()
-            const to = setTimeout(() => ctrl.abort(), timeoutMs)
-            const res = await fetch(url, {
-                cache: 'no-store',
-                keepalive: true,
-                signal: ctrl.signal,
-                headers: {
-                    'Accept': 'application/json',
-                },
-            })
-            clearTimeout(to)
-            if (!res.ok) throw new Error(`status ${res.status}`)
-            return (await res.json()) as T
-        } catch (e) {
-            lastErr = e
-        }
+export async function fetchUpstream<T = any>(url: string, timeoutMs = 5000): Promise<T> {
+    // \uc7ac\uc2dc\ub3c4 1\ud68c\ub85c \ucd95\uc18c - CoinGecko\ub294 \ub290\ub9ac\uc9c0\ub9cc \uc548\uc815\uc801\uc774\ubbc0\ub85c \ubd88\ud544\uc694\ud55c \ub300\uae30 \uc2dc\uac04 \uac10\uc18c
+    const ctrl = new AbortController()
+    const timeoutId = setTimeout(() => ctrl.abort(), timeoutMs)
+    
+    try {
+        const res = await fetch(url, {
+            cache: 'no-store',
+            keepalive: true,
+            signal: ctrl.signal,
+            headers: {
+                'Accept': 'application/json',
+            },
+        })
+        clearTimeout(timeoutId)
+        if (!res.ok) throw new Error(`status ${res.status}`)
+        return (await res.json()) as T
+    } catch (error) {
+        clearTimeout(timeoutId)
+        throw error
     }
-    throw lastErr
 }
 
 /**

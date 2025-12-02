@@ -8,76 +8,73 @@ type Coin = { id: string; name: string; symbol: string; market_cap_rank: number;
 type Exchange = { name: string; market_type: string; thumb: string }
 type NFT = { name: string; symbol: string; thumb: string }
 
-export default function Client({ initial, initialQuery }: { initial: { coins: Coin[]; exchanges: Exchange[]; nfts: NFT[] } | null; initialQuery: string }) {
+export default function Client({ initialQuery }: { initialQuery: string }) {
   const router = useRouter()
   const [query, setQuery] = useState<string>(initialQuery)
-  const [coins, setCoins] = useState<Coin[]>(initial?.coins || [])
-  const [exchanges, setExchanges] = useState<Exchange[]>(initial?.exchanges || [])
-  const [nfts, setNfts] = useState<NFT[]>(initial?.nfts || [])
-  const [loading, setLoading] = useState({ coins: false, exchanges: false, nfts: false })
-  const [errors, setErrors] = useState({ coins: false, exchanges: false, nfts: false })
+  const [coins, setCoins] = useState<Coin[]>([])
+  const [exchanges, setExchanges] = useState<Exchange[]>([])
+  const [nfts, setNfts] = useState<NFT[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
-  const debounceRef = useRef<NodeJS.Timeout | null>(null)
+  const fetchedQueryRef = useRef<string>('')
 
   const filterResults = useCallback((data: any) => {
-    let filteredCoins = (data.coins || []).filter((coin: Coin) => coin.thumb !== 'missing_thumb.png')
-    let filteredExchanges = (data.exchanges || []).filter((ex: Exchange) => ex.thumb !== 'missing_thumb.png')
-    let filteredNfts = (data.nfts || []).filter((nf: NFT) => nf.thumb !== 'missing_thumb.png')
-    const minCount = Math.min(filteredCoins.length, filteredExchanges.length, filteredNfts.length)
-    if (filteredCoins.length && filteredExchanges.length && filteredNfts.length) {
-      filteredCoins = filteredCoins.slice(0, minCount)
-      filteredExchanges = filteredExchanges.slice(0, minCount)
-      filteredNfts = filteredNfts.slice(0, minCount)
-    }
+    const filteredCoins = (data.coins || []).filter((coin: Coin) => coin.thumb !== 'missing_thumb.png')
+    const filteredExchanges = (data.exchanges || []).filter((ex: Exchange) => ex.thumb !== 'missing_thumb.png')
+    const filteredNfts = (data.nfts || []).filter((nf: NFT) => nf.thumb !== 'missing_thumb.png')
     return { filteredCoins, filteredExchanges, filteredNfts }
   }, [])
 
-  useEffect(() => {
-    if (!query) return
-    if (initial) return // server provided data
-    
-    // Debounce: 사용자가 타이핑 중이면 대기
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    
-    debounceRef.current = setTimeout(() => {
-      const ctrl = new AbortController()
-      abortRef.current?.abort()
-      abortRef.current = ctrl
-      ;(async () => {
-        try {
-          setLoading({ coins: true, exchanges: true, nfts: true })
-          setErrors({ coins: false, exchanges: false, nfts: false })
-          
-          // 더 짧은 타임아웃과 keepalive로 성능 개선
-          const timeoutId = setTimeout(() => ctrl.abort(), 3000)
-          const res = await fetch(`/api/search?query=${encodeURIComponent(query)}`, { 
-            cache: 'force-cache', 
-            signal: ctrl.signal,
-            keepalive: true
-          })
-          clearTimeout(timeoutId)
-          
-          if (!res.ok) throw new Error('Network error')
-          const data = await res.json()
-          const { filteredCoins, filteredExchanges, filteredNfts } = filterResults(data)
-          setCoins(filteredCoins)
-          setExchanges(filteredExchanges)
-          setNfts(filteredNfts)
-        } catch (err) {
-          if ((err as Error).name !== 'AbortError') {
-            setErrors({ coins: true, exchanges: true, nfts: true })
-          }
-        } finally {
-          setLoading({ coins: false, exchanges: false, nfts: false })
-        }
-      })()
-    }, 300) // 300ms debounce
-    
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      abortRef.current?.abort()
+  const fetchData = useCallback(async (searchQuery: string) => {
+    if (!searchQuery || fetchedQueryRef.current === searchQuery) return;
+    fetchedQueryRef.current = searchQuery;
+
+    // 이전 요청 취소
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    try {
+      setLoading(true);
+      setError(false);
+
+      const res = await fetch(`/api/search?query=${encodeURIComponent(searchQuery)}`, {
+        // 강력한 브라우저 캐싱 - 같은 검색어 재검색 시 즉시 응답
+        cache: 'force-cache',
+        signal: ctrl.signal,
+      });
+
+      if (!res.ok) throw new Error('Network error');
+      const data = await res.json();
+      const { filteredCoins, filteredExchanges, filteredNfts } = filterResults(data);
+      setCoins(filteredCoins);
+      setExchanges(filteredExchanges);
+      setNfts(filteredNfts);
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        setError(true);
+      }
+    } finally {
+      setLoading(false);
     }
-  }, [query, initial, filterResults])
+  }, [filterResults]);
+
+  useEffect(() => {
+    if (!query) {
+      setCoins([]);
+      setExchanges([]);
+      setNfts([]);
+      fetchedQueryRef.current = '';
+      return;
+    }
+
+    fetchData(query);
+
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, [query, fetchData])
 
   const CoinsRows = useMemo(() => coins.map((coin, idx) => (
     <tr key={idx} onClick={() => router.push(`/coin/${coin.id}`)} style={{ cursor: 'pointer' }}>
@@ -125,38 +122,50 @@ export default function Client({ initial, initialQuery }: { initial: { coins: Co
       <div className="search-container">
         <div className="item">
           <h4>Asset Results</h4>
-          {loading.coins ? (
+          {loading ? (
             <div className="spinner" />
           ) : coins.length ? (
             createTable(['Rank', 'Coin'], CoinsRows)
-          ) : errors.coins ? (
-            <div className="error-message">API limit reached. Please try again later.</div>
+          ) : error ? (
+            <div className="error-message">API 요청 실패. 잠시 후 다시 시도해주세요.</div>
+          ) : query ? (
+            <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
+              &quot;{query}&quot;에 대한 코인 결과가 없습니다.
+            </p>
           ) : (
-            <p style={{ color: 'red', textAlign: 'center' }}>No results found for coins.</p>
+            <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>검색어를 입력하세요.</p>
           )}
         </div>
         <div className="item">
           <h4>Exchange Results</h4>
-          {loading.exchanges ? (
+          {loading ? (
             <div className="spinner" />
           ) : exchanges.length ? (
             createTable(['Exchange', 'Market'], ExchangesRows)
-          ) : errors.exchanges ? (
-            <div className="error-message">API limit reached. Please try again later.</div>
+          ) : error ? (
+            <div className="error-message">API 요청 실패. 잠시 후 다시 시도해주세요.</div>
+          ) : query ? (
+            <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
+              &quot;{query}&quot;에 대한 거래소 결과가 없습니다.
+            </p>
           ) : (
-            <p style={{ color: 'red', textAlign: 'center' }}>No results found for exchanges.</p>
+            <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>검색어를 입력하세요.</p>
           )}
         </div>
         <div className="item">
           <h4>NFT Results</h4>
-          {loading.nfts ? (
+          {loading ? (
             <div className="spinner" />
           ) : nfts.length ? (
             createTable(['NFT', 'Symbol'], NFTRows)
-          ) : errors.nfts ? (
-            <div className="error-message">API limit reached. Please try again later.</div>
+          ) : error ? (
+            <div className="error-message">API 요청 실패. 잠시 후 다시 시도해주세요.</div>
+          ) : query ? (
+            <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>
+              &quot;{query}&quot;에 대한 NFT 결과가 없습니다.
+            </p>
           ) : (
-            <p style={{ color: 'red', textAlign: 'center' }}>No results found for nfts.</p>
+            <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>검색어를 입력하세요.</p>
           )}
         </div>
       </div>

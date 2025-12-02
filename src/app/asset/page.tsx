@@ -1,7 +1,7 @@
 // app/wallet/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useTheme } from "../../context/ThemeContext";
 
 type Asset = {
@@ -67,12 +67,14 @@ export default function DepositWithdrawPage() {
     const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
     const [loading, setLoading] = useState(true);
     const [coinPrices, setCoinPrices] = useState<Record<string, number>>({});
+    const [pricesLoading, setPricesLoading] = useState(false);
+    const fetchControllerRef = useRef<AbortController | null>(null);
 
     // 검색 상태
     const [searchTerm, setSearchTerm] = useState("");
     
-    // CoinGecko 가격 조회 함수 (캐싱 적용)
-    const fetchCoinPrices = async (symbols: string[]) => {
+    // CoinGecko 가격 조회 함수 (캐싱 적용, AbortController 지원)
+    const fetchCoinPrices = useCallback(async (symbols: string[], signal?: AbortSignal) => {
         const now = Date.now();
         const symbolsToFetch: string[] = [];
         const cachedPrices: Record<string, number> = {};
@@ -98,7 +100,10 @@ export default function DepositWithdrawPage() {
                 if (ids) {
                     const res = await fetch(
                         `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=krw`,
-                        { next: { revalidate: 300 } } // 5분 캐싱
+                        { 
+                            signal,
+                            cache: 'force-cache'
+                        }
                     );
                     
                     if (res.ok) {
@@ -115,12 +120,14 @@ export default function DepositWithdrawPage() {
                     }
                 }
             } catch (error) {
-                console.error('CoinGecko API error:', error);
+                if (error instanceof Error && error.name !== 'AbortError') {
+                    // AbortError는 무시
+                }
             }
         }
 
         return cachedPrices;
-    };
+    }, []);
     
     // Assets 변환 (가격 정보 포함)
     const assets: Asset[] = useMemo(() => {
@@ -236,39 +243,31 @@ export default function DepositWithdrawPage() {
                     } catch {}
                 }
                 
-                console.log('Token found:', !!token);
                 if (!token) {
-                    // 토큰이 없으면 조용히 로딩 종료 (로그인 안 한 상태)
                     setLoading(false);
                     return;
                 }
 
                 // 사용자 정보 가져오기
-                console.log('Fetching /api/me...');
                 const meRes = await fetch('/api/me', {
                     headers: { Authorization: `Bearer ${token}` },
-                    credentials: 'include'
+                    credentials: 'include',
+                    cache: 'force-cache'
                 });
 
-                console.log('/api/me status:', meRes.status, meRes.ok);
                 if (!meRes.ok) {
-                    console.log('/api/me failed');
                     setLoading(false);
                     return;
                 }
 
                 const meData = await meRes.json();
-                console.log('Full /api/me response:', meData);
                 
-                // data.user 또는 user 경로 모두 확인
                 const userData = meData?.data?.user ?? meData?.user;
                 const uid = userData?.id;
                 const balance = userData?.balance || 0;
                 const email = userData?.email || '';
-                console.log('Extracted userId:', uid, 'balance:', balance, 'email:', email);
 
                 if (!uid) {
-                    console.log('No userId found');
                     setLoading(false);
                     return;
                 }
@@ -295,14 +294,22 @@ export default function DepositWithdrawPage() {
                     const holdingsData = portfolioData.data?.holdings ?? portfolioData.holdings ?? [];
                     setHoldings(holdingsData);
                     
-                    // 코인 가격 조회 (백그라운드에서 비동기 처리)
+                    // 코인 가격 조회 (지연 로딩 - 500ms 후)
                     if (holdingsData.length > 0) {
-                        const symbols = holdingsData.map((h: PortfolioHolding) => h.symbol.toUpperCase());
-                        fetchCoinPrices(symbols).then(prices => {
-                            setCoinPrices(prices);
-                        }).catch(err => {
-                            console.error('Failed to fetch coin prices:', err);
-                        });
+                        setTimeout(() => {
+                            if (fetchControllerRef.current) {
+                                fetchControllerRef.current.abort();
+                            }
+                            fetchControllerRef.current = new AbortController();
+                            const symbols = holdingsData.map((h: PortfolioHolding) => h.symbol.toUpperCase());
+                            setPricesLoading(true);
+                            fetchCoinPrices(symbols, fetchControllerRef.current.signal).then(prices => {
+                                setCoinPrices(prices);
+                                setPricesLoading(false);
+                            }).catch(() => {
+                                setPricesLoading(false);
+                            });
+                        }, 500);
                     }
                 }
 
@@ -339,13 +346,18 @@ export default function DepositWithdrawPage() {
 
                 setLoading(false);
             } catch (error) {
-                console.error('Error fetching user data:', error);
                 setLoading(false);
             }
         }
 
         fetchUserData();
-    }, []);
+        
+        return () => {
+            if (fetchControllerRef.current) {
+                fetchControllerRef.current.abort();
+            }
+        };
+    }, [fetchCoinPrices]);
 
     useEffect(() => {
         const isDark = theme !== "light-theme";
@@ -360,12 +372,29 @@ export default function DepositWithdrawPage() {
         <main className="page" style={{ backgroundColor: bgColor }}>
             {loading ? (
                 <div className="container">
-                    <div className="center" style={{ padding: '40px' }}>
-                        <div>로딩 중...</div>
+                    <div className="grid">
+                        <div className="col">
+                            <div className="card">
+                                <div className="skeleton-header"></div>
+                                <div className="skeleton-search"></div>
+                                <div className="skeleton-list">
+                                    {[1, 2, 3, 4].map(i => (
+                                        <div key={i} className="skeleton-item"></div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="col">
+                            <div className="card">
+                                <div className="skeleton-header"></div>
+                                <div className="skeleton-content"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             ) : (
             <div className="container">
+                {pricesLoading && <div className="price-loader">가격 정보 로딩 중...</div>}
                 <section className="grid">
                     {/* 왼쪽: 총 보유자산 */}
                     <div className="col">
@@ -598,13 +627,13 @@ export default function DepositWithdrawPage() {
                                                         const holdingsData = portfolioData.data?.holdings ?? portfolioData.holdings ?? [];
                                                         setHoldings(holdingsData);
                                                         
-                                                        // 가격 정보 유지 (캐시 사용)
+                                                        // 가격 정보 유지 (캐시 사용, 즉시 로드)
                                                         if (holdingsData.length > 0) {
                                                             const symbols = holdingsData.map((h: PortfolioHolding) => h.symbol.toUpperCase());
                                                             fetchCoinPrices(symbols).then(prices => {
                                                                 setCoinPrices(prices);
-                                                            }).catch(err => {
-                                                                console.error('Failed to refresh coin prices:', err);
+                                                            }).catch(() => {
+                                                                // 에러 무시
                                                             });
                                                         }
                                                     }
@@ -1126,6 +1155,63 @@ export default function DepositWithdrawPage() {
                 /* 라벨과 셀렉트 간 여백/정렬 미세 조정 */
                 .label .select {
                     margin-top: 6px;
+                }
+                
+                /* 스켈레톤 로더 스타일 */
+                .skeleton-header {
+                    height: 80px;
+                    background: linear-gradient(90deg, var(--background-color-secondary) 25%, var(--border-color) 50%, var(--background-color-secondary) 75%);
+                    background-size: 200% 100%;
+                    animation: skeleton-loading 1.5s ease-in-out infinite;
+                    border-radius: 8px;
+                    margin-bottom: 16px;
+                }
+                .skeleton-search {
+                    height: 40px;
+                    background: linear-gradient(90deg, var(--background-color-secondary) 25%, var(--border-color) 50%, var(--background-color-secondary) 75%);
+                    background-size: 200% 100%;
+                    animation: skeleton-loading 1.5s ease-in-out infinite;
+                    border-radius: 8px;
+                    margin-bottom: 12px;
+                }
+                .skeleton-list {
+                    display: grid;
+                    gap: 12px;
+                }
+                .skeleton-item {
+                    height: 60px;
+                    background: linear-gradient(90deg, var(--background-color-secondary) 25%, var(--border-color) 50%, var(--background-color-secondary) 75%);
+                    background-size: 200% 100%;
+                    animation: skeleton-loading 1.5s ease-in-out infinite;
+                    border-radius: 8px;
+                }
+                .skeleton-content {
+                    height: 200px;
+                    background: linear-gradient(90deg, var(--background-color-secondary) 25%, var(--border-color) 50%, var(--background-color-secondary) 75%);
+                    background-size: 200% 100%;
+                    animation: skeleton-loading 1.5s ease-in-out infinite;
+                    border-radius: 8px;
+                    margin-top: 16px;
+                }
+                @keyframes skeleton-loading {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
+                }
+                .price-loader {
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: var(--color-primary, #1565C0);
+                    color: white;
+                    padding: 8px 16px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    z-index: 1000;
+                    animation: fadeIn 0.3s ease-in-out;
+                }
+                @keyframes fadeIn {
+                    from { opacity: 0; transform: translateY(-10px); }
+                    to { opacity: 1; transform: translateY(0); }
                 }
             `}</style>
         </main>

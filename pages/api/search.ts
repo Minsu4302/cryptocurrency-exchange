@@ -27,10 +27,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const key = `search:${q.toLowerCase()}`
     const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`
 
-    // 검색 결과는 자주 변하지 않으므로 긴 캐시 사용 (60초 fresh, 10분 stale)
-    return serveWithCache(res, key, async () => fetchUpstream(url, 3000), {
-        freshSec: 60,
-        staleSec: 600,
-        lockSec: 8
+    // 검색 결과는 자주 변하지 않으므로 긴 캐시 사용 (5분 fresh, 30분 stale)
+    return serveWithCache(res, key, async () => fetchUpstream(url, 10000), {
+        freshSec: 300,  // 5분
+        staleSec: 1800, // 30분
+        lockSec: 10
     })
 }

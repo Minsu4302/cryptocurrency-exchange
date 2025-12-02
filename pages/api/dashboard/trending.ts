@@ -21,5 +21,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const key = 'dash:trending'
     const url = 'https://api.coingecko.com/api/v3/search/trending'
 
-    return serveWithCache(res, key, async () => fetchUpstream(url))
+    // 트렌딩은 자주 변하지 않음 - 긴 캐시 사용
+    return serveWithCache(res, key, async () => fetchUpstream(url), {
+        freshSec: 300,  // 5분
+        staleSec: 1800, // 30분
+        lockSec: 10
+    })
 }

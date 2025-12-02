@@ -60,10 +60,6 @@ export default function MarketClient({
             setNfts((data.nfts || []).slice(0, 5));
           }
         }
-        // 나머지 탭 백그라운드 프리페치
-        void handleTabChange('tab2');
-        void handleTabChange('tab3');
-        void handleTabChange('tab4');
       } catch {
         // ignore
       }
@@ -75,6 +71,7 @@ export default function MarketClient({
     setActiveTab(tab);
     if (!tabDataLoaded[tab]) {
       setLoading(true);
+      setError(null);
       try {
         if (tab === 'tab1') {
           const res = await fetch(
@@ -98,8 +95,9 @@ export default function MarketClient({
           setCompanies(data.companies || []);
         }
         setTabDataLoaded((prev) => ({ ...prev, [tab]: true }));
-      } catch {
-        setError('API 호출 실패');
+      } catch (err) {
+        setError(`${tab} 데이터 로드 실패`);
+        console.error(`Tab ${tab} load error:`, err);
       } finally {
         setLoading(false);
       }
